@@ -13,6 +13,7 @@ from src.utils import parse_feature_list
 from src.config import EXTRA_COST_FEATURES
 from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
+from src.exporter import build_updated_excel_bytes, save_updated_excel_file
 from src.persistence import ApprovalsStore
 from src.sheets import make_client, load_from_sheets
 
@@ -272,7 +273,6 @@ def main():
                     "Recommended Plan": rec['recommended_plan'],
                     "Extras (Add-ons)": ", ".join(rec['extras']),
                     "Extras Count": rec.get('extras_count', 0),
-                    "Costly Extras Count": rec.get('extras_costly_count', 0),
                     "Costly Bloat Count": rec.get('bloat_costly_count', 0),
                     "Bloat Score": rec.get('bloat_score', 0),
                     "Status": rec['status'],
@@ -299,6 +299,26 @@ def main():
             res_filtered = res_df[res_df['Recommended Plan'].isin(selected_plans)] if selected_plans else res_df
 
             st.dataframe(res_filtered.drop(columns=['Raw Rec']))
+
+            # Export updated Excel (with approvals merged)
+            st.markdown("\n**Export Updated Excel**")
+            approvals_df = store.all()
+            if st.button("Generate Updated Excel"):
+                try:
+                    bytes_xlsx = build_updated_excel_bytes(st.session_state.get('data', {}), approvals_df)
+                    st.session_state['last_export_excel'] = bytes_xlsx
+                    # Also save to workspace for convenience
+                    save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), approvals_df)
+                    st.success("Generated updated Excel and saved to data/updated_migration.xlsx")
+                except Exception as e:
+                    st.error(f"Export error: {e}")
+            if st.session_state.get('last_export_excel'):
+                st.download_button(
+                    label="Download updated_migration.xlsx",
+                    data=st.session_state['last_export_excel'],
+                    file_name="updated_migration.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
 
             st.divider()
             st.subheader("🕵️ Agent & Human Review")
@@ -387,6 +407,13 @@ def main():
                             approved_by=approved_by.strip(),
                         )
                         st.success("Saved and locked. Re-run logic to see locked status in table.")
+                        # Auto-save updated Excel snapshot
+                        try:
+                            st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
+                            save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
+                            st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                        except Exception:
+                            pass
 
                 st.markdown("---")
                 st.markdown("**Choose from Candidates**")
@@ -402,7 +429,6 @@ def main():
                     st.json({
                         'plan': cand.get('plan'),
                         'extras': cand.get('extras', []),
-                        'extras_costly': cand.get('extras_costly', []),
                         'bloat_features': cand.get('bloat_features', []),
                         'bloat_costly': cand.get('bloat_costly', []),
                     })
@@ -418,6 +444,12 @@ def main():
                                 approved_by=approved_by.strip(),
                             )
                             st.success("Selected candidate approved and locked.")
+                            try:
+                                st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
+                                save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
+                                st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                            except Exception:
+                                pass
 
                 st.markdown("---")
                 st.markdown("**Apply AI Decision**")
@@ -451,6 +483,12 @@ def main():
                                 approved_by=approved_by.strip(),
                             )
                             st.success("AI decision approved and locked.")
+                            try:
+                                st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
+                                save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
+                                st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                            except Exception:
+                                pass
 
 if __name__ == "__main__":
     main()

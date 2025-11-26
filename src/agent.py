@@ -57,7 +57,6 @@ class ReviewAgent:
              
            - **➕ EXTRAS (Add-ons):** {extras}
              *(These are features the user has that are NOT in the plan and need to be added)*
-             - **💵 Paid Extras (avoid if possible):** {paid_extras}
            
            - **⚠️ BLOAT (Plan+Extras − Current):** {bloat_features}
              *(Capabilities included in the Plan plus Extras that the user does NOT currently use)*

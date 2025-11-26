@@ -110,8 +110,6 @@ class DecisionAgent:
             # Calculate what this plan actually covers
             extras_set = set(self._parse_features(extras))
             covered = list(user_set - extras_set)
-            # Paid extras (additional cost)
-            paid_extras = [e for e in extras_set if str(e).strip().lower() in cost_set]
             # Paid bloat (we can't give these for free)
             paid_bloat = [b for b in bloat if str(b).strip().lower() in cost_set]
 
@@ -119,7 +117,6 @@ class DecisionAgent:
             --- OPTION {i+1}: {plan_name} ---
             - 🔍 COVERED FEATURES ({len(covered)}): {covered}
             - ➕ EXTRAS NEEDED ({len(extras)}): {extras}
-            - 💵 PAID EXTRAS ({len(paid_extras)}): {paid_extras}
             - 🚫 PAID BLOAT ({len(paid_bloat)}): {paid_bloat}
             - ⚠️ BLOAT (Plan+Extras − Current Features) ({bloat_score}): {bloat}
             """
@@ -131,7 +128,7 @@ class DecisionAgent:
 
         ### DECISION RULES (The "Golden Path"):
         1. **Strict SubType Match:** The plan MUST match the account's SubType (e.g. Bunkering -> Bunkering Plan).
-        2. **Minimize Extras (Primary):** Prefer the plan that needs the fewest Add-ons (extras), even if that means accepting some bloat. Strongly avoid paid extras where possible by choosing plans that include them natively.
+        2. **Minimize Extras (Primary):** Prefer the plan that needs the fewest Add-ons (extras), even if that means accepting some bloat.
         3. **Minimize Bloat (Secondary):** Between options with similar extras, choose lower bloat. Define bloat as (Plan Features + Chosen Extras) minus Current Features. Avoid plans whose bloat includes paid features, since these cannot be given for free.
         4. **Mapping Intelligence:** If an "Extra" looks like a feature that should be in the plan (e.g., "wetCargo" vs "Wet Cargo Data"), consider it 'Covered' in your reasoning.
 

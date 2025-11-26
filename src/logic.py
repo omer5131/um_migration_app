@@ -99,11 +99,9 @@ class MigrationLogic:
             covered = sorted(user_features & plan_features)
             # Extras are gaps the user has that the plan lacks
             extras = sorted(user_features - plan_features)
-            # Identify costly extras (case-insensitive)
-            extras_lower = [e.lower() for e in extras]
-            costly_set = {x.lower() for x in EXTRA_COST_FEATURES}
-            costly_extras = [e for e, el in zip(extras, extras_lower) if el in costly_set]
-            extras_weighted = len(extras) + EXTRA_COST_WEIGHT * len(costly_extras)
+            # Extras weighting: do NOT penalize costly extras (they're already paid) -> simple count
+            costly_extras = []
+            extras_weighted = len(extras)
             # Bloat is computed on the effective bundle (plan + extras) minus user features
             effective_bundle = plan_features | set(extras)
             bloat = sorted(effective_bundle - user_features)
@@ -129,7 +127,7 @@ class MigrationLogic:
                 'coverage_count': len(covered),
             })
 
-        # New priority: minimize extras (weighted for costly extras), then bloat (weighted for costly bloat);
+        # New priority: minimize extras (simple count), then bloat (weighted for costly bloat);
         # tie-break by higher coverage
         analyses.sort(key=lambda x: (x['extras_weighted'], x['bloat_weighted'], -x['coverage_count']))
         winner = analyses[0]
