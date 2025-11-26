@@ -9,12 +9,14 @@ from src.utils import parse_feature_list, clean_feature_name
 
 
 class MigrationLogic:
-    def __init__(self, plan_matrix_df=None, plan_json: dict | None = None):
+    def __init__(self, plan_matrix_df=None, plan_json: dict | None = None, cost_bloat_weight: int | None = None):
         if isinstance(plan_json, dict) and plan_json:
             # Use pre-built JSON mapping of plan -> list(features)
             self.plan_definitions = {k: set(v or []) for k, v in plan_json.items()}
         else:
             self.plan_definitions = self._build_plan_definitions(plan_matrix_df)
+        # Allow runtime tuning of paid-bloat penalty
+        self.cost_bloat_weight = cost_bloat_weight if cost_bloat_weight is not None else EXTRA_COST_BLOAT_WEIGHT
 
     def _build_plan_definitions(self, df):
         """
@@ -93,30 +95,29 @@ class MigrationLogic:
             }
 
         analyses = []
+        valid_candidates = []
         for plan in candidates:
             plan_features = set(clean_feature_name(f) for f in self.plan_definitions.get(plan, set()))
 
             covered = sorted(user_features & plan_features)
             # Extras are gaps the user has that the plan lacks
             extras = sorted(user_features - plan_features)
-            # Extras weighting: do NOT penalize costly extras (they're already paid) -> simple count
-            costly_extras = []
+            # Extras weighting: simple count (paid extras not penalized)
             extras_weighted = len(extras)
-            # Bloat is computed on the effective bundle (plan + extras) minus user features
-            effective_bundle = plan_features | set(extras)
-            bloat = sorted(effective_bundle - user_features)
+            # Bloat = plan features the user doesn't currently use
+            bloat = sorted(plan_features - user_features)
             # Identify costly bloat features (we can't give these for free)
             cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-            bloat_lower = [b.lower() for b in bloat]
-            bloat_costly = [b for b, bl in zip(bloat, bloat_lower) if bl in cost_set]
-            bloat_weighted = len(bloat) + EXTRA_COST_BLOAT_WEIGHT * len(bloat_costly)
+            bloat_costly = [b for b in bloat if str(b).strip().lower() in cost_set]
+            # Hard constraint: reject plans with any paid bloat
+            if len(bloat_costly) > 0:
+                continue
+            bloat_weighted = len(bloat) + self.cost_bloat_weight * len(bloat_costly)
 
-            analyses.append({
+            row_data = {
                 'plan': plan,
                 'covered_features': covered,
                 'extras': extras,
-                'extras_costly': costly_extras,
-                'extras_costly_count': len(costly_extras),
                 'bloat_features': bloat,
                 'bloat_score': len(bloat),
                 'bloat_costly': bloat_costly,
@@ -125,20 +126,36 @@ class MigrationLogic:
                 'extras_count': len(extras),
                 'extras_weighted': extras_weighted,
                 'coverage_count': len(covered),
-            })
+            }
+            analyses.append(row_data)
+            valid_candidates.append(row_data)
 
-        # New priority: minimize extras (simple count), then bloat (weighted for costly bloat);
-        # tie-break by higher coverage
-        analyses.sort(key=lambda x: (x['extras_weighted'], x['bloat_weighted'], -x['coverage_count']))
-        winner = analyses[0]
+        # If none passed the hard constraint, bail out
+        if not valid_candidates:
+            return {
+                'status': 'No Valid Plans',
+                'recommended_plan': 'Manual Review',
+                'covered_features': [],
+                'extras': [],
+                'bloat_features': [],
+                'bloat_score': 0,
+                'bloat_costly': [],
+                'bloat_costly_count': 0,
+                'bloat_weighted': 0,
+                'extras_count': 0,
+                'extras_weighted': 0,
+                'all_candidates': [],
+                'reason': 'All candidates rejected due to paid bloat or no subtype matches',
+            }
+        # New priority: minimize extras (simple count), then bloat (weighted for costly bloat); tie-break by higher coverage
+        valid_candidates.sort(key=lambda x: (x['extras_count'], x['bloat_weighted'], -x['coverage_count']))
+        winner = valid_candidates[0]
 
         return {
             'status': 'Success',
             'recommended_plan': winner['plan'],
             'covered_features': winner['covered_features'],
             'extras': winner['extras'],
-            'extras_costly': winner['extras_costly'],
-            'extras_costly_count': winner['extras_costly_count'],
             'bloat_features': winner['bloat_features'],
             'bloat_score': winner['bloat_score'],
             'bloat_costly': winner['bloat_costly'],
@@ -150,8 +167,6 @@ class MigrationLogic:
                 {
                     'plan': a['plan'],
                     'extras': a['extras'],
-                    'extras_costly': a['extras_costly'],
-                    'extras_costly_count': a['extras_costly_count'],
                     'extras_weighted': a['extras_weighted'],
                     'bloat_features': a['bloat_features'],
                     'bloat_count': a['bloat_score'],
@@ -159,6 +174,6 @@ class MigrationLogic:
                     'bloat_costly_count': a['bloat_costly_count'],
                     'bloat_weighted': a['bloat_weighted'],
                 }
-                for a in analyses
+                for a in valid_candidates
             ],
         }

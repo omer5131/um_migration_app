@@ -12,8 +12,8 @@ FILES = {
 # Mapping SubType to specific keywords found in the 'PLAN' column of Plan <> FF.csv
 SUBTYPE_KEYWORD_MAP = {
     "bunkering": "Bunkering",
-    "oil": "Oil",
-    "energy": "Energy",
+    "oil": "Oil",  # Matches 'Oil & Energy'
+    "energy": "Oil",
     "shipowner": "Shipowners",
     "operator": "Shipowners",
     "insurance": "Insurer",
@@ -21,22 +21,15 @@ SUBTYPE_KEYWORD_MAP = {
     "financial": "Financial",
     "bank": "Financial",
     "commodity": "Commodity",
-    "trader": "Trader",
-    "freight": "Maritime",
-    "maritime": "Maritime"
+    "trader": "Commodity",  # Matches 'Commodity Trader'
+    "freight": "Maritime",  # Matches 'Maritime Services'
+    "maritime": "Maritime",
 }
 
 # Features that are considered high-cost (paid) if added as extras
 EXTRA_COST_FEATURES = {
-    # normalize comparisons to lowercase in code
-    "maiexpertvesseladversemedia",
-    "maiexpertvesselsummary",
-    "ubodata",
-    "wetcargodata",
-    "nasagridtable",
-    "nasaggridtable",
-    "vlamaiexpert",
-    "visuallinkanalysis",
+    'uboData', 'wetCargoData', 'vlaMaiExpert', 'nasAgGridTable',
+    'maiExpertVesselSummary', 'uboData', 'cddScreening', 'exportCenter'
 }
 
 
@@ -46,3 +39,4 @@ EXTRA_COST_WEIGHT = 0
 
 # Additional weight applied when high-cost features appear in BLOAT (we can't give these for free)
 EXTRA_COST_BLOAT_WEIGHT = 100
+

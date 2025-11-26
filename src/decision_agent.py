@@ -126,11 +126,12 @@ class DecisionAgent:
         You are an expert Account Migration Decision Maker.
         Your goal is to select the BEST plan for a customer based on their current feature usage.
 
-        ### DECISION RULES (The "Golden Path"):
-        1. **Strict SubType Match:** The plan MUST match the account's SubType (e.g. Bunkering -> Bunkering Plan).
-        2. **Minimize Extras (Primary):** Prefer the plan that needs the fewest Add-ons (extras), even if that means accepting some bloat.
-        3. **Minimize Bloat (Secondary):** Between options with similar extras, choose lower bloat. Define bloat as (Plan Features + Chosen Extras) minus Current Features. Avoid plans whose bloat includes paid features, since these cannot be given for free.
-        4. **Mapping Intelligence:** If an "Extra" looks like a feature that should be in the plan (e.g., "wetCargo" vs "Wet Cargo Data"), consider it 'Covered' in your reasoning.
+        ### DECISION RULES (Strict):
+        1) Strict SubType Match: The plan MUST match the account's SubType (e.g., Bunkering -> Bunkering plan family).
+        2) NO Paid Bloat: If a plan includes any expensive features the user does not currently use (paid bloat), REJECT that plan.
+        3) Minimize Extras (Primary): Among valid plans, prefer the plan that requires the fewest extras (add-ons), even if there is some harmless bloat.
+        4) Minimize Bloat (Secondary): If extras are similar, choose the plan with less bloat overall.
+        5) Normalization: Treat feature names case-insensitively; trim whitespace.
 
         ### OUTPUT FORMAT:
         Produce a decision in this specific format:
@@ -147,7 +148,7 @@ class DecisionAgent:
         **Available Plan Options:**
         {candidates_context}
 
-        **Task:** Compare the options above. Select the one that minimizes Extras first, then minimizes Bloat (Plan+Extras − Current), while covering the user's needs.
+        **Task:** Compare the options above. Reject options with any Paid Bloat. From the remainder, select the plan that minimizes Extras first, then minimizes Bloat, while covering the user's needs.
         """
 
         try:

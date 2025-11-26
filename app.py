@@ -1,4 +1,6 @@
 import streamlit as st
+import os
+import json
 import pandas as pd
 from src.data_loader import (
     load_all_data,
@@ -10,12 +12,13 @@ from src.data_loader import (
 )
 from src.logic import MigrationLogic
 from src.utils import parse_feature_list
-from src.config import EXTRA_COST_FEATURES
+from src.config import EXTRA_COST_FEATURES, EXTRA_COST_BLOAT_WEIGHT
 from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
 from src.persistence import ApprovalsStore
-from src.sheets import make_client, load_from_sheets
+from src.sheets import make_client, load_from_sheets, extract_key_from_url, write_dataframe
+from src.db import init_or_update_db, load_from_db, write_approvals_to_db
 
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
@@ -30,16 +33,29 @@ def main():
     openai_key = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
     approved_by = st.sidebar.text_input("Your Name (for approvals)")
     use_ai_bulk = st.sidebar.checkbox("Use AI for recommendations (beta)", value=False)
+    paid_bloat_penalty = st.sidebar.slider(
+        "Paid bloat penalty (weight)", min_value=0, max_value=15, value=EXTRA_COST_BLOAT_WEIGHT, step=1,
+        help="Higher weight penalizes plans that include paid features the user doesn't have."
+    )
 
     store = ApprovalsStore()
 
     # Shared: data loader state
     if "data" not in st.session_state:
         st.session_state["data"] = None
+    # Auto-load saved Plan JSON (flattened) if present so the app always uses it
+    if st.session_state["data"] is None:
+        try:
+            if os.path.exists("data/plan_json.json"):
+                with open("data/plan_json.json", "r") as f:
+                    saved_plan_json = json.load(f)
+                st.session_state["data"] = {"plan_json": saved_plan_json}
+        except Exception:
+            pass
 
     if tab == "Data Sources":
         st.subheader("Connect Data Sources")
-        source = st.radio("Select data source", ["Excel Workbook", "CSV Files (default)", "Google Sheets"], index=0)
+        source = st.radio("Select data source", ["Excel Workbook", "CSV Files (default)", "Google Sheets", "SQLite (local)",], index=0)
 
         if source == "Excel Workbook":
             upl = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
@@ -74,18 +90,41 @@ def main():
                 if data:
                     st.session_state["data"] = data
                     st.success("CSV data loaded.")
+        elif source == "SQLite (local)":
+            db_path = st.text_input("SQLite DB path", value="data/migration.db")
+            colx, coly = st.columns(2)
+            with colx:
+                if st.button("Load from SQLite"):
+                    try:
+                        data = load_from_db(db_path)
+                        st.session_state["data"] = data
+                        st.session_state["sqlite_path"] = db_path
+                        st.success(f"Loaded from {db_path}")
+                    except Exception as e:
+                        st.error(f"SQLite load error: {e}")
+            with coly:
+                if st.button("Init/Sync current data → SQLite"):
+                    try:
+                        d = st.session_state.get("data", {})
+                        init_or_update_db(db_path, d.get("mapping", pd.DataFrame()), d.get("plan_json", {}), store.all())
+                        st.session_state["sqlite_path"] = db_path
+                        st.success(f"Wrote current data to {db_path}")
+                    except Exception as e:
+                        st.error(f"SQLite write error: {e}")
         else:
-            st.write("Provide Google Sheets details and Service Account JSON.")
+            st.write("Provide Google Sheets URL(s) and Service Account JSON.")
             col_a, col_b = st.columns(2)
             with col_a:
-                acc_key = st.text_input("Accounts Spreadsheet Key")
-                acc_ws = st.text_input("Accounts Worksheet Name", value="Accounts")
-                map_key = st.text_input("Mapping Spreadsheet Key")
+                default_url = "https://docs.google.com/spreadsheets/d/12uSZdBwdR_RrbxTW7xrx0yuf9idXVEHIgjQ2nLm-KCE/edit?gid=1389810451"
+                sheet_url = st.text_input("Google Sheet URL (auto-detected)", value=default_url)
                 map_ws = st.text_input("Mapping Worksheet Name", value="Account<>CSM<>Project")
-                plan_key = st.text_input("Plan<>FF Spreadsheet Key")
                 plan_ws = st.text_input("Plan<>FF Worksheet Name", value="Plan <> FF")
+                approvals_ws = st.text_input("Approvals Worksheet Name (write-back)", value="Approvals")
+                updated_map_ws = st.text_input("Updated Mapping Sheet (write-back)", value="Account<>CSM<>Project (updated)")
+                enable_write = st.checkbox("Enable write-back to Google Sheet", value=True,
+                                           help="Service Account must have edit access to this spreadsheet.")
             with col_b:
-                creds_json = st.text_area("Service Account JSON", height=200)
+                creds_json = st.text_area("Service Account JSON", height=220)
 
             if st.button("Connect & Load Sheets"):
                 if not creds_json.strip():
@@ -93,14 +132,27 @@ def main():
                 else:
                     try:
                         client = make_client(creds_json)
-                        sheets_cfg = {
-                            'accounts': {"spreadsheet_key": acc_key, "worksheet": acc_ws},
-                            'mapping': {"spreadsheet_key": map_key, "worksheet": map_ws},
-                            'plan_matrix': {"spreadsheet_key": plan_key, "worksheet": plan_ws},
-                        }
-                        data = load_from_sheets(client, sheets_cfg)
-                        st.session_state["data"] = data
-                        st.success("Sheets data loaded.")
+                        key = extract_key_from_url(sheet_url)
+                        if not key:
+                            st.error("Could not extract spreadsheet key from the URL.")
+                        else:
+                            sheets_cfg = {
+                                'mapping': {"spreadsheet_key": key, "worksheet": map_ws},
+                                'plan_matrix': {"spreadsheet_key": key, "worksheet": plan_ws},
+                            }
+                            data = load_from_sheets(client, sheets_cfg)
+                            # Keep connection details for later write-back
+                            st.session_state["gsheets"] = {
+                                'client': client,
+                                'spreadsheet_key': key,
+                                'mapping_ws': map_ws,
+                                'plan_ws': plan_ws,
+                                'approvals_ws': approvals_ws,
+                                'updated_map_ws': updated_map_ws,
+                                'enable_write': enable_write,
+                            }
+                            st.session_state["data"] = data
+                            st.success("Sheets data loaded.")
                     except Exception as e:
                         st.error(f"Sheets error: {e}")
 
@@ -108,7 +160,8 @@ def main():
         st.subheader("Manual Plan JSON (override)")
         st.caption("Paste a nested family → plan → features JSON to override the Plan <> FF mapping.")
         plan_json_text = st.text_area("Plan JSON", value="{}", height=220)
-        if st.button("Use This Plan JSON"):
+        col_m1, col_m2 = st.columns(2)
+        if col_m1.button("Use This Plan JSON"):
             import json
             try:
                 nested = json.loads(plan_json_text)
@@ -119,9 +172,39 @@ def main():
                 # keep raw for debug
                 st.session_state["data"]["plan_json_raw"] = nested
                 st.session_state["data"].pop("plan_matrix", None)
-                st.success(f"Loaded manual Plan JSON with {len(flat)} plans. Extras: {len(extras)} items")
+                # Persist to disk so future sessions reuse it automatically
+                try:
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/plan_json.json", "w") as f:
+                        json.dump(flat, f, indent=2)
+                    with open("data/plan_json_raw.json", "w") as f:
+                        json.dump(nested, f, indent=2)
+                    st.success(f"Saved manual Plan JSON to data/plan_json.json ({len(flat)} plans). Extras captured: {len(extras)} items")
+                    # Also sync the new plan mapping into SQLite if configured
+                    sqlite_path = st.session_state.get("sqlite_path")
+                    if sqlite_path:
+                        from src.db import init_or_update_db
+                        d = st.session_state.get("data", {})
+                        mapping_df = d.get("mapping", pd.DataFrame())
+                        init_or_update_db(sqlite_path, mapping_df, flat, store.all())
+                        st.info(f"Updated plan mapping synced to SQLite at {sqlite_path}")
+                except Exception as e:
+                    st.warning(f"Loaded Plan JSON, but failed to persist to file: {e}")
             except Exception as e:
                 st.error(f"Invalid JSON: {e}")
+        if col_m2.button("Clear Saved Plan JSON"):
+            try:
+                if os.path.exists("data/plan_json.json"):
+                    os.remove("data/plan_json.json")
+                if os.path.exists("data/plan_json_raw.json"):
+                    os.remove("data/plan_json_raw.json")
+                # Also clear from session if desired
+                if st.session_state.get("data"):
+                    st.session_state["data"].pop("plan_json", None)
+                    st.session_state["data"].pop("plan_json_raw", None)
+                st.success("Cleared saved Plan JSON files.")
+            except Exception as e:
+                st.error(f"Failed to clear saved Plan JSON: {e}")
 
         if st.session_state["data"] is not None:
             d = st.session_state["data"]
@@ -159,7 +242,7 @@ def main():
             st.warning("Please load data first in 'Data Sources'.")
             st.stop()
 
-        logic_engine = MigrationLogic(data.get('plan_matrix'), data.get('plan_json'))
+        logic_engine = MigrationLogic(data.get('plan_matrix'), data.get('plan_json'), cost_bloat_weight=paid_bloat_penalty)
         agent = ReviewAgent(openai_key)
         decision_agent = DecisionAgent(openai_key)
         st.session_state.setdefault('ai_decisions', {})
@@ -320,6 +403,42 @@ def main():
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
 
+            # Optional: write current state to SQLite
+            sqlite_path = st.session_state.get("sqlite_path", "data/migration.db")
+            if st.button("Sync to SQLite"):
+                try:
+                    d = st.session_state.get("data", {})
+                    init_or_update_db(sqlite_path, d.get("mapping", pd.DataFrame()), d.get("plan_json", {}), approvals_df)
+                    st.success(f"Synced to SQLite at {sqlite_path}")
+                except Exception as e:
+                    st.error(f"SQLite sync error: {e}")
+
+            # Optional: Sync approvals and updated mapping back to Google Sheets
+            gs = st.session_state.get('gsheets')
+            if gs and gs.get('enable_write'):
+                if st.button("Sync to Google Sheet"):
+                    try:
+                        client = gs['client']
+                        key = gs['spreadsheet_key']
+                        # Write approvals
+                        write_dataframe(client, key, gs['approvals_ws'], approvals_df)
+                        # Build updated mapping with Final Plan/Final Extras merged
+                        from src.exporter import build_updated_excel_bytes
+                        # Recreate updated mapping similar to exporter
+                        mapping_df = st.session_state.get('data', {}).get('mapping')
+                        name_col = 'name' if ('name' in mapping_df.columns) else (
+                            'SalesForce_Account_NAME' if 'SalesForce_Account_NAME' in mapping_df.columns else None)
+                        out_df = mapping_df.copy()
+                        if name_col:
+                            appr = approvals_df[["Account", "Final Plan", "Extras", "Approved By", "Approved At"]].rename(
+                                columns={"Account": name_col, "Final Plan": "Final Plan", "Extras": "Final Extras"}
+                            )
+                            out_df = out_df.merge(appr, on=name_col, how="left")
+                        write_dataframe(client, key, gs['updated_map_ws'], out_df)
+                        st.success("Synced approvals and updated mapping to Google Sheet.")
+                    except Exception as e:
+                        st.error(f"Google Sheets sync error: {e}")
+
             st.divider()
             st.subheader("🕵️ Agent & Human Review")
 
@@ -412,6 +531,14 @@ def main():
                             st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                             save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
                             st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                            # Also sync approvals to SQLite if configured
+                            sqlite_path = st.session_state.get("sqlite_path")
+                            if sqlite_path:
+                                write_approvals_to_db(sqlite_path, store.all())
+                            # Optionally sync to Google Sheets
+                            gs = st.session_state.get('gsheets')
+                            if gs and gs.get('enable_write'):
+                                write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
                         except Exception:
                             pass
 
@@ -448,6 +575,12 @@ def main():
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
                                 st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                                sqlite_path = st.session_state.get("sqlite_path")
+                                if sqlite_path:
+                                    write_approvals_to_db(sqlite_path, store.all())
+                                gs = st.session_state.get('gsheets')
+                                if gs and gs.get('enable_write'):
+                                    write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
                             except Exception:
                                 pass
 
@@ -487,6 +620,12 @@ def main():
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
                                 st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
+                                sqlite_path = st.session_state.get("sqlite_path")
+                                if sqlite_path:
+                                    write_approvals_to_db(sqlite_path, store.all())
+                                gs = st.session_state.get('gsheets')
+                                if gs and gs.get('enable_write'):
+                                    write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
                             except Exception:
                                 pass
 

@@ -6,13 +6,34 @@ from src.config import FILES
 def _build_plan_json(plan_df: pd.DataFrame) -> dict:
     """Transform Plan <> FF dataframe into {plan: [features,...]} dict.
 
-    - Detects columns containing 'PLAN' (plan name) and 'FF' or 'FEATURE' (feature flag).
-    - Cleans NaNs and whitespace.
-    - Deduplicates features per plan.
+    Preferred parsing (two-column long format):
+    - First column: Plan name (appears once, with empty cells below)
+    - Second column: Feature name
+    - We ffill the plan column and group features per plan.
+
+    Fallbacks:
+    - Detect columns containing 'PLAN' and one or more 'FF'/'FEATURE' columns.
+    - Or a wide matrix with one 'FF' feature column and plan columns as truthy markers.
     """
     result: dict[str, set] = {}
     if plan_df is None or plan_df.empty:
         return {}
+
+    # Try the simple two-column approach first
+    if plan_df.shape[1] >= 2:
+        df2 = plan_df.iloc[:, :2].copy()
+        plan_col2, feat_col2 = df2.columns[0], df2.columns[1]
+        df2[plan_col2] = df2[plan_col2].ffill()
+        df2 = df2[~df2[feat_col2].isna()].copy()
+        df2[plan_col2] = df2[plan_col2].astype(str).str.strip()
+        df2[feat_col2] = df2[feat_col2].astype(str).str.strip()
+        plan_json = {}
+        for plan, sub in df2.groupby(plan_col2):
+            feats = [f for f in sub[feat_col2].tolist() if f and f.lower() != 'nan']
+            if feats:
+                plan_json[plan] = sorted(list(dict.fromkeys(feats)))
+        if plan_json:
+            return plan_json
 
     df = plan_df.copy()
     df.columns = [str(c).upper().strip() for c in df.columns]
