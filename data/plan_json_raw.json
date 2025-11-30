@@ -67,6 +67,7 @@
       "wetCargoData"
     ]
   },
+
   "Bunkering": {
     "Bunkering Core": [
       "hideRuleEngine",
@@ -139,6 +140,7 @@
       "wetCargoData"
     ]
   },
+
   "Insurer": {
     "Insurer Core": [
       "hideRuleEngine",
@@ -200,6 +202,7 @@
       "wetCargoData"
     ]
   },
+
   "Commodity Trader": {
     "Commodity Trader Core": [
       "hideRuleEngine",
@@ -262,6 +265,7 @@
       "wetCargoData"
     ]
   },
+
   "Custom": {
     "Custom": [
       "hideRuleEngine",
@@ -285,6 +289,7 @@
       "nasPremiumCsvColumns"
     ]
   },
+
   "Financial Institutions": {
     "Financial Institutions Core": [
       "hideRuleEngine",
@@ -336,6 +341,7 @@
       "weatherLayer"
     ]
   },
+
   "EXTRAS": {
     "Extras": [
       "cddScreening",

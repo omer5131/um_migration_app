@@ -1,0 +1,15 @@
+{
+  "name": "migration-script",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Bun scripts to run the Python migration app",
+  "scripts": {
+    "check": "python3 -c \"import streamlit, pandas; print('ok')\"",
+    "app": "streamlit run app.py --server.headless=true --server.port=8501",
+    "app:8502": "streamlit run app.py --server.headless=true --server.port=8502",
+    "app:any": "streamlit run app.py --server.headless=true --server.port=0",
+    "dev": "python3 scripts/dev.py",
+    "dev:headless": "python3 scripts/dev.py --headless",
+    "tests": "pytest -q"
+  }
+}

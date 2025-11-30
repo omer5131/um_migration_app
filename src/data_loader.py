@@ -1,6 +1,9 @@
+import os
 import pandas as pd
 import streamlit as st
-from src.config import FILES
+from src.config import FILES, AIRTABLE
+from src.airtable import AirtableConfig, load_cached_or_fetch
+from src.plan_definitions import get_flat_plan_json
 
 
 def _build_plan_json(plan_df: pd.DataFrame) -> dict:
@@ -145,45 +148,109 @@ def flatten_family_plan_json(nested: dict) -> tuple[dict, list]:
 
 @st.cache_data
 def load_all_data():
+    """Load mapping/accounts with preference for cached Airtable; fallback to CSVs.
+
+    - If `AIRTABLE['CACHE_PATH']` exists, load mapping from it.
+    - Otherwise, try to fetch from Airtable if credentials provided and persist cache.
+    - Finally, fallback to CSV files.
+    """
     data = {}
-    missing = []
-    
-    # Load specific CSVs
+
+    # Prefer Airtable cache if present
+    cache_path = AIRTABLE.get("CACHE_PATH")
+    used_airtable = False
+    if cache_path and os.path.exists(cache_path):
+        try:
+            import json
+            with open(cache_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            rows = payload.get("rows", [])
+            data['mapping'] = pd.DataFrame(rows)
+            used_airtable = True
+        except Exception as e:
+            st.warning(f"Airtable cache load failed, falling back to CSV: {e}")
+
+    # Try live fetch if allowed and no cache used
+    if not used_airtable and all(AIRTABLE.get(k) for k in ("API_KEY", "BASE_ID", "TABLE", "CACHE_PATH")):
+        try:
+            cfg = AirtableConfig(
+                api_key=AIRTABLE['API_KEY'],
+                base_id=AIRTABLE['BASE_ID'],
+                table_id_or_name=AIRTABLE['TABLE'],
+                view=AIRTABLE.get('VIEW') or None,
+            )
+            df = load_cached_or_fetch(cfg, AIRTABLE['CACHE_PATH'], ttl_seconds=None)
+            data['mapping'] = df
+            used_airtable = True
+        except Exception as e:
+            st.warning(f"Airtable fetch failed, falling back to CSV: {e}")
+
+    # Fallback to CSVs for mapping/accounts
+    if not used_airtable:
+        try:
+            data['mapping'] = pd.read_csv(FILES['account_csm_project'])
+        except FileNotFoundError as e:
+            st.error(f"Missing File: {e}")
+            return None
+
+    # Accounts CSV is optional; if present, load
     try:
         data['accounts'] = pd.read_csv(FILES['accounts'])
-        data['mapping'] = pd.read_csv(FILES['account_csm_project'])
-        # Load the critical Plan <> FF file
-        # It has a weird header structure based on snippets, usually Row 0 is header
-        data['plan_matrix'] = pd.read_csv(FILES['plan_features'])
-        # Build structured JSON-like plan dictionary
-        data['plan_json'] = _build_plan_json(data['plan_matrix'])
-    except FileNotFoundError as e:
-        st.error(f"Missing File: {e}")
-        return None
-        
+    except FileNotFoundError:
+        data['accounts'] = pd.DataFrame()
+
+    # Use hard-coded plan mapping
+    data['plan_json'] = get_flat_plan_json()
     return data
 
 
 @st.cache_data
-def load_from_csv_paths(accounts_path: str, mapping_path: str, plan_matrix_path: str):
+def load_from_csv_paths(accounts_path: str, mapping_path: str):
+    """Load CSVs directly from provided paths; use hard-coded plan JSON."""
     try:
         accounts_df = pd.read_csv(accounts_path)
+    except FileNotFoundError:
+        accounts_df = pd.DataFrame()
+    try:
         mapping_df = pd.read_csv(mapping_path)
-        plan_df = pd.read_csv(plan_matrix_path)
-        return {
-            'accounts': accounts_df,
-            'mapping': mapping_df,
-            'plan_matrix': plan_df,
-            'plan_json': _build_plan_json(plan_df),
-        }
     except FileNotFoundError as e:
         st.error(f"Missing File: {e}")
         return None
+    return {
+        'accounts': accounts_df,
+        'mapping': mapping_df,
+        'plan_json': get_flat_plan_json(),
+    }
+
+
+@st.cache_data
+def load_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
+    """Load mapping from Airtable (cached to disk). Plan JSON remains hard-coded.
+
+    - refresh=True forces a fetch.
+    - ttl_seconds controls staleness if not forcing refresh.
+    """
+    req_keys = ("API_KEY", "BASE_ID", "TABLE", "CACHE_PATH")
+    if not all(AIRTABLE.get(k) for k in req_keys):
+        st.error("Missing Airtable config. Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE.")
+        return None
+    cfg = AirtableConfig(
+        api_key=AIRTABLE['API_KEY'],
+        base_id=AIRTABLE['BASE_ID'],
+        table_id_or_name=AIRTABLE['TABLE'],
+        view=AIRTABLE.get('VIEW') or None,
+    )
+    ttl = 0 if refresh else ttl_seconds
+    df = load_cached_or_fetch(cfg, AIRTABLE['CACHE_PATH'], ttl_seconds=ttl)
+    return {
+        'mapping': df,
+        'plan_json': get_flat_plan_json(),
+    }
 
 
 @st.cache_data
 def suggest_excel_sheet_mapping(sheet_names: list[str]):
-    """Heuristically suggest sheet names for accounts, mapping, plan_matrix."""
+    """Heuristically suggest the mapping sheet name only."""
     lower = [s.lower() for s in sheet_names]
     def find(*keywords):
         for i, s in enumerate(lower):
@@ -192,28 +259,19 @@ def suggest_excel_sheet_mapping(sheet_names: list[str]):
         return None
 
     mapping = find('csm') or find('mapping') or find('project') or (sheet_names[0] if sheet_names else None)
-    plan = find('plan') or find('ff') or find('feature') or (sheet_names[1] if len(sheet_names) > 1 else mapping)
-    return {
-        'mapping': mapping,
-        'plan_matrix': plan,
-    }
+    return {'mapping': mapping}
 
 
 @st.cache_data
 def load_from_excel(file_bytes: bytes, sheet_map: dict):
-    """Load dataframes from an Excel workbook using provided sheet mapping.
-
-    sheet_map keys expected here: 'mapping', 'plan_matrix'
-    """
+    """Load dataframes from an Excel workbook; mapping only. Plan JSON is hard-coded."""
     try:
         dfs = {}
-        for key, sheet in sheet_map.items():
-            if not sheet:
-                raise ValueError(f"Missing sheet selection for '{key}'")
-            dfs[key] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
-        # Also compute structured plan JSON
-        if 'plan_matrix' in dfs:
-            dfs['plan_json'] = _build_plan_json(dfs['plan_matrix'])
+        sheet = sheet_map.get('mapping')
+        if not sheet:
+            raise ValueError("Missing sheet selection for 'mapping'")
+        dfs['mapping'] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
+        dfs['plan_json'] = get_flat_plan_json()
         return dfs
     except FileNotFoundError as e:
         st.error(f"Missing File: {e}")

@@ -1,0 +1,6 @@
+.env
+data/airtable_mapping.json
+logs/
+__pycache__/
+.pytest_cache/
+*.pyc

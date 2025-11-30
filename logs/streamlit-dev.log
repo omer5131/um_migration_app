@@ -1,0 +1,14 @@
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8502
+  Network URL: http://192.168.10.108:8502
+  External URL: http://31.154.46.218:8502
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+            
+/Users/omer.barhanin/migtation script/src/data_loader.py:206: FutureWarning: Passing bytes to 'read_excel' is deprecated and will be removed in a future version. To read from a byte string, wrap it in a `BytesIO` object.
+  dfs['mapping'] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
