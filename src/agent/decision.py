@@ -99,6 +99,8 @@ class DecisionAgent:
             extras = cand.get("extras", [])
             bloat = cand.get("bloat_features", [])
             bloat_score = cand.get("bloat_count", len(bloat))
+            ga_feats = cand.get("gaFeatures", [])
+            irr_feats = cand.get("irrelevantFeatures", [])
 
             extras_set = set(self._parse_features(extras))
             covered = list(user_set - extras_set)
@@ -108,6 +110,8 @@ class DecisionAgent:
             --- OPTION {i+1}: {plan_name} ---
             - 🔍 COVERED FEATURES ({len(covered)}): {covered}
             - ➕ EXTRAS NEEDED ({len(extras)}): {extras}
+            - 🌐 GA FEATURES ({len(ga_feats)}): {ga_feats}
+            - 🚫 IRRELEVANT FEATURES ({len(irr_feats)}): {irr_feats}
             - 🚫 PAID BLOAT ({len(paid_bloat)}): {paid_bloat}
             - ⚠️ BLOAT (Plan+Extras − Current Features) ({bloat_score}): {bloat}
             """

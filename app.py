@@ -11,7 +11,7 @@ from src.data_loader import (
 )
 from src.logic import MigrationLogic
 from src.utils import parse_feature_list
-from src.config import EXTRA_COST_FEATURES, EXTRA_COST_BLOAT_WEIGHT
+from src.config import EXTRA_COST_FEATURES, EXTRA_COST_BLOAT_WEIGHT, GA_FEATURES, IRRELEVANT_FEATURES
 from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
@@ -20,6 +20,7 @@ from src.sheets import make_client, load_from_sheets, extract_key_from_url, writ
 from src.config import AIRTABLE as AT_CFG
 from src.airtable import AirtableConfig as ATConfig, upsert_single as at_upsert_single, upsert_dataframe as at_upsert_df
 from src.plan_definitions import get_flat_plan_json
+from src.json_reorder import reorder_features_json
 
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
@@ -581,6 +582,30 @@ def main():
             progress = st.progress(0)
             total = len(df_filtered)
 
+            # Helpers for GA/Irrelevant classification
+            def _classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[str]) -> dict:
+                ga = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(GA_FEATURES)}
+                irr = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(IRRELEVANT_FEATURES)}
+                # Precedence GA over Irrelevant
+                irr -= ga
+                # Sanitize for comparison
+                plan_norm = plan_feats - ga - irr
+                user_norm = user_feats - ga - irr
+                extras_norm = extras_set - ga - irr
+                effective_bundle = plan_norm | extras_norm
+                bloat_features = sorted(effective_bundle - user_norm)
+                cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
+                bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
+                return {
+                    'ga': sorted(ga),
+                    'irrelevant': sorted(irr),
+                    'plan_norm': plan_norm,
+                    'user_norm': user_norm,
+                    'extras_norm': extras_norm,
+                    'bloat_features': bloat_features,
+                    'bloat_costly': bloat_costly,
+                }
+
             for i, row in df_filtered.iterrows():
                 account_name = row.get('name', str(i))
                 approved = store.get(account_name)
@@ -591,18 +616,19 @@ def main():
                     plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))
                     user_features = set(parse_feature_list(row.get('featureNames', [])))
                     chosen_extras = set(approved['Extras'])
-                    effective_bundle = plan_features | chosen_extras
-                    bloat_features = sorted(effective_bundle - user_features)
-                    cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-                    bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
+                    cls = _classify_sets(plan_features, user_features, chosen_extras)
+                    bloat_features = cls['bloat_features']
+                    bloat_costly = cls['bloat_costly']
                     rec = {
                         'recommended_plan': plan_name,
-                        'extras': list(chosen_extras),
-                        'extras_count': len(chosen_extras),
+                        'extras': sorted(list(cls['extras_norm'])),
+                        'extras_count': len(cls['extras_norm']),
                         'bloat_score': len(bloat_features),
                         'bloat_features': bloat_features,
                         'bloat_costly': bloat_costly,
                         'bloat_costly_count': len(bloat_costly),
+                        'gaFeatures': cls['ga'],
+                        'irrelevantFeatures': cls['irrelevant'],
                         'status': 'Locked (Human Approved)',
                     }
                 else:
@@ -629,14 +655,15 @@ def main():
                     plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))
                     user_features = set(parse_feature_list(row.get('featureNames', [])))
                     extras_set = set(rec.get('extras', []))
-                    effective_bundle = plan_features | extras_set
-                    bloat_features = sorted(effective_bundle - user_features)
-                    cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-                    bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
+                    cls = _classify_sets(plan_features, user_features, extras_set)
+                    bloat_features = cls['bloat_features']
+                    bloat_costly = cls['bloat_costly']
                     rec['bloat_score'] = len(bloat_features)
                     rec['bloat_features'] = bloat_features
                     rec['bloat_costly'] = bloat_costly
                     rec['bloat_costly_count'] = len(bloat_costly)
+                    rec['gaFeatures'] = cls['ga']
+                    rec['irrelevantFeatures'] = cls['irrelevant']
 
                 res_row = {
                     "Account": account_name,
@@ -644,6 +671,8 @@ def main():
                     "Recommended Plan": rec['recommended_plan'],
                     "Extras (Add-ons)": ", ".join(rec['extras']),
                     "Extras Count": rec.get('extras_count', 0),
+                    "GA Features": ", ".join(rec.get('gaFeatures', [])),
+                    "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
                     "Bloat Features": ", ".join(rec.get('bloat_features', [])),
                     "Costly Bloat Count": rec.get('bloat_costly_count', 0),
                     "Bloat Score": rec.get('bloat_score', 0),
@@ -865,12 +894,7 @@ def main():
                 if selected_idx is not None:
                     cand = candidates[selected_idx]
                     st.caption("Preview of selected candidate")
-                    st.json({
-                        'plan': cand.get('plan'),
-                        'extras': cand.get('extras', []),
-                        'bloat_features': cand.get('bloat_features', []),
-                        'bloat_costly': cand.get('bloat_costly', []),
-                    })
+                    st.json(reorder_features_json(cand))
                     if st.button("Approve Selected Option & Lock"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
@@ -915,21 +939,28 @@ def main():
                 ai_dec = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
                 if ai_dec and isinstance(ai_dec, dict) and isinstance(ai_dec.get('parsed'), dict):
                     parsed = ai_dec['parsed']
-                    # Compute bloat as (plan + extras) - user_features
+                    # Compute GA/Irrelevant/bloat with precedence
                     plan_name = parsed.get('plan')
                     plan_feats = set(logic_engine.plan_definitions.get(plan_name, set()))
                     extras_list = [str(x).strip() for x in parsed.get('extras', [])]
                     user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
-                    effective = plan_feats | set(extras_list)
-                    bloat_feats = sorted(effective - user_feats)
+                    cls = _classify_sets(plan_feats, user_feats, set(extras_list))
+                    bloat_feats = cls['bloat_features']
+                    ga_feats = cls['ga']
+                    irr_feats = cls['irrelevant']
                     st.caption(parsed.get('reasoning', ''))
-                    st.json({
-                        'plan': plan_name,
-                        'extras': extras_list,
-                        'covered': parsed.get('covered', []),
-                        'bloat_features': bloat_feats,
-                        'bloat_score': len(bloat_feats),
-                    })
+                    st.json(
+                        reorder_features_json(
+                            {
+                                'plan': plan_name,
+                                'extras': sorted(list(cls['extras_norm'])),
+                                'bloat_features': bloat_feats,
+                                'bloat_costly': parsed.get('bloat_costly', []),
+                                'gaFeatures': ga_feats,
+                                'irrelevantFeatures': irr_feats,
+                            }
+                        )
+                    )
                     if st.button("Approve AI Decision & Lock"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")

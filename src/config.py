@@ -60,6 +60,35 @@ AIRTABLE = {
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
+# Global Availability (GA) features — always available and not counted as extras/bloat
+GA_FEATURES = [
+    "activitySequences",
+    "mapMarkers",
+    "nasAddVesselsToVoi",
+    "nasTransmissionInAreaActivityType",
+    "nasAccidentsActivity",
+    "warRiskArea",
+    "newAdvancedSearch",
+    "newNasRiskDesign",
+    "newNasSideBarDesign",
+    "darkFleetVOI",
+    "trafficLanes",
+    "uncertaintyArea",
+    "grayFleetVOI",
+    "userAlreadyLoggedInWarning",
+]
+
+# Irrelevant features — ignored in comparisons and not counted toward extras/bloat/GA/missing
+# Note: If a feature appears in both GA and Irrelevant, GA takes precedence (see engine precedence rules).
+IRRELEVANT_FEATURES = [
+    "activitySequences",
+    "advancedSearch",
+    "advancedSearchOwners",
+    "elasticSearch",
+    "meetings",
+    "newAdvancedSearch",
+]
+
 # Mapping SubType to specific keywords found in the 'PLAN' column of Plan <> FF.csv
 SUBTYPE_KEYWORD_MAP = {
     "bunkering": "Bunkering",
@@ -79,7 +108,7 @@ SUBTYPE_KEYWORD_MAP = {
 
 # Features that are considered high-cost (paid) if added as extras
 EXTRA_COST_FEATURES = {
-    'uboData', 'wetCargoData', 'vlaMaiExpert', 'nasAgGridTable',
+    'uboData', 'wetCargoData', 'visualLinkAnalysis', 'nasAgGridTable',
     'maiExpertVesselSummary', 'uboData', 'cddScreening', 'exportCenter'
 }
 

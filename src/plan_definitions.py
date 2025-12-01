@@ -8,10 +8,15 @@ You can still override via the app’s “Manual Plan JSON (override)” section
 """
 
 from typing import Dict, List
+from src.config import GA_FEATURES
 
 
 # Nested family → plan → features, as provided
 NESTED_PLAN_JSON: Dict[str, dict | list] = {
+    "Global": {
+        # GA plan captures globally available features; not selected as a recommended plan
+        "GA": GA_FEATURES,
+    },
     "Shipowners": {
         "Shipowners Core": [
             "hideRuleEngine",

@@ -8,6 +8,8 @@ from src.config import (
     SUBTYPE_KEYWORD_MAP,
     EXTRA_COST_FEATURES,
     EXTRA_COST_BLOAT_WEIGHT,
+    GA_FEATURES,
+    IRRELEVANT_FEATURES,
 )
 from src.utils import parse_feature_list, clean_feature_name
 
@@ -71,6 +73,22 @@ class MigrationLogic:
         self.cost_bloat_weight = (
             cost_bloat_weight if cost_bloat_weight is not None else EXTRA_COST_BLOAT_WEIGHT
         )
+        # Classification sets (canonicalized)
+        self.ga_set: Set[str] = {canonicalize(f, self.synonyms) for f in GA_FEATURES}
+        self.irrelevant_set: Set[str] = {canonicalize(f, self.synonyms) for f in IRRELEVANT_FEATURES}
+
+    def _classify(self, features: Iterable[str]) -> dict:
+        """Classify into GA / Irrelevant / Normal. Precedence: GA -> Irrelevant -> Normal."""
+        ga, irr, normal = set(), set(), set()
+        for f in (features or []):
+            cf = canonicalize(f, self.synonyms)
+            if cf in self.ga_set:
+                ga.add(cf)
+            elif cf in self.irrelevant_set:
+                irr.add(cf)
+            else:
+                normal.add(cf)
+        return {"ga": ga, "irrelevant": irr, "normal": normal}
 
     def _build_plan_definitions(self, df: pd.DataFrame | None):
         definitions: Dict[str, Set[str]] = {}
@@ -159,14 +177,17 @@ class MigrationLogic:
         all_plan_features: Set[str] = set().union(*self.plan_definitions.values()) if self.plan_definitions else set()
         synonym_hits = {f for f in raw_user_features if canonicalize(f, self.synonyms) != clean_feature_name(f)}
         for plan in candidates:
-            plan_features = {
-                clean_feature_name(f) for f in self.plan_definitions.get(plan, set())
-            }
+            plan_features_raw = {clean_feature_name(f) for f in self.plan_definitions.get(plan, set())}
+            # Classify and sanitize
+            u = self._classify(user_features)
+            p = self._classify(plan_features_raw)
+            user_norm = u["normal"]
+            plan_norm = p["normal"]
 
-            covered = sorted(user_features & plan_features)
-            extras = sorted(user_features - plan_features)
+            covered = sorted(user_norm & plan_norm)
+            extras = sorted(user_norm - plan_norm)
             extras_weighted = len(extras)
-            bloat = sorted(plan_features - user_features)
+            bloat = sorted(plan_norm - user_norm)
             cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
             bloat_costly = [b for b in bloat if str(b).strip().lower() in cost_set]
             if len(bloat_costly) > 0:
@@ -185,6 +206,9 @@ class MigrationLogic:
                 synonym_used=synonym_used,
             )
 
+            ga_combined = sorted(list((u["ga"] | p["ga"])) )
+            irr_combined = sorted(list((u["irrelevant"] | p["irrelevant"])) )
+
             row_data = {
                 "plan": plan,
                 "covered_features": covered,
@@ -198,6 +222,11 @@ class MigrationLogic:
                 "extras_weighted": extras_weighted,
                 "coverage_count": len(covered),
                 "business_value_score": bv_score,
+                "gaFeatures": ga_combined,
+                "irrelevantFeatures": irr_combined,
+                "planFeatures": sorted(list(plan_norm)),
+                "accountFeatures": sorted(list(user_norm)),
+                "missingFeatures": extras,
             }
             analyses.append(row_data)
             valid_candidates.append(row_data)
@@ -269,32 +298,63 @@ class MigrationLogic:
                     "bloat_weighted": a["bloat_weighted"],
                     "coverage_count": a["coverage_count"],
                     "business_value_score": a["business_value_score"],
+                    "gaFeatures": a.get("gaFeatures", []),
+                    "irrelevantFeatures": a.get("irrelevantFeatures", []),
+                    "planFeatures": a.get("planFeatures", []),
+                    "accountFeatures": a.get("accountFeatures", []),
+                    "missingFeatures": a.get("missingFeatures", []),
                 }
                 for a in valid_candidates
             ],
+            # New sections for GA/Irrelevant and normalized views
+            "gaFeatures": winner.get("gaFeatures", []),
+            "irrelevantFeatures": winner.get("irrelevantFeatures", []),
+            "planFeatures": winner.get("planFeatures", []),
+            "accountFeatures": winner.get("accountFeatures", []),
+            "missingFeatures": winner.get("missingFeatures", []),
+            "why": f"GA Features in this plan: {', '.join(winner.get('gaFeatures', [])) or 'None'}",
         }
 
     def apply_human_override(self, plan_name: str, extras_list: Iterable[str], user_features: Iterable[str]) -> dict:
-        """Apply a CSM override while enforcing red lines and recomputing metrics."""
-        extras_norm = [canonicalize(e, self.synonyms) for e in (extras_list or [])]
-        user_norm = [canonicalize(u, self.synonyms) for u in (user_features or [])]
-        stats = compute_bloat_stats(self.plan_definitions, plan_name, extras_norm, user_norm)
+        """Apply a CSM override while enforcing red lines and recomputing metrics.
+
+        Respects GA and Irrelevant precedence; these do not contribute to extras/bloat.
+        """
+        extras_canon = [canonicalize(e, self.synonyms) for e in (extras_list or [])]
+        user_canon = [canonicalize(u, self.synonyms) for u in (user_features or [])]
+
+        # Classify and sanitize
+        u = self._classify(user_canon)
+        e = self._classify(extras_canon)
+        plan_features_raw = list(self.plan_definitions.get(plan_name, set()))
+        p = self._classify(plan_features_raw)
+
+        user_norm = u["normal"]
+        plan_norm = p["normal"]
+        extras_norm = e["normal"]
+
+        # Effective bundle and bloat after removing GA/irrelevant
+        effective_bundle = plan_norm | set(extras_norm)
+        bloat_features = sorted(effective_bundle - user_norm)
         cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-        paid_bloat = [b for b in stats["bloat_features"] if str(b).strip().lower() in cost_set]
+        paid_bloat = [b for b in bloat_features if str(b).strip().lower() in cost_set]
         if paid_bloat:
             return {
                 "status": "REJECTED_RED_LINE",
                 "reason": "Override introduces paid bloat",
                 "paid_bloat": paid_bloat,
             }
-        plan_features = set(self.plan_definitions.get(plan_name, set()))
-        user_set = set(user_norm)
-        covered = sorted(user_set & plan_features)
+        covered = sorted(user_norm & plan_norm)
         extras = sorted(set(extras_norm))
         return {
             "status": "APPROVED_BY_CSM",
             "final_plan": plan_name,
             "extras": extras,
             "covered_features": covered,
-            **stats,
+            "bloat_features": bloat_features,
+            "bloat_costly": paid_bloat,
+            "bloat_costly_count": len(paid_bloat),
+            "bloat_score": len(bloat_features),
+            "gaFeatures": sorted(list((u["ga"] | p["ga"]))),
+            "irrelevantFeatures": sorted(list((u["irrelevant"] | p["irrelevant"]))),
         }

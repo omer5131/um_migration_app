@@ -42,6 +42,8 @@ class ReviewAgent:
         plan = recommendation.get("recommended_plan")
         extras = [str(x).strip() for x in recommendation.get("extras", [])]
         bloat_features = recommendation.get("bloat_features") or recommendation.get("bloat_details", [])
+        ga_feats = sorted([str(x).strip() for x in recommendation.get("gaFeatures", [])])
+        irr_feats = sorted([str(x).strip() for x in recommendation.get("irrelevantFeatures", [])])
         cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
         paid_bloat = [b for b in bloat_features if str(b).strip().lower() in cost_set]
 
@@ -85,6 +87,8 @@ class ReviewAgent:
             "paid_bloat": paid_bloat,
             "subtype_aligned": subtype_aligned,
             "unrecognized_features": unrecognized,
+            "gaFeatures": ga_feats,
+            "irrelevantFeatures": irr_feats,
         }
 
     def review_recommendation(
@@ -134,6 +138,8 @@ class ReviewAgent:
 
            - **✅ MATCHED FEATURES (Covered):** {covered_features}
            - **➕ EXTRAS (Add-ons):** {extras}
+           - **🌐 GA FEATURES (not counted):** {ga_feats}
+           - **🚫 IRRELEVANT FEATURES (ignored):** {irr_feats}
            - **⚠️ BLOAT (Plan+Extras − Current):** {bloat_features}
              - **🚫 Paid Bloat (cannot give for free):** {paid_bloat}
 

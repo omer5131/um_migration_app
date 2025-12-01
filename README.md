@@ -40,3 +40,24 @@ This application automates the mapping of existing customer accounts to a new "P
     * `utils.py`: Helper functions for parsing and data cleaning.
 * `scripts/sync_airtable.py`: CLI to sync Airtable → `data/airtable_mapping.json`.
 * `config/.env.example`: Example Airtable environment configuration.
+
+## Secrets (Streamlit Cloud)
+
+- Do not commit real secrets. `.env` and local secrets files are ignored by git.
+- In Streamlit Community Cloud, set secrets via App → Settings → Secrets. Paste TOML like:
+
+```
+[AIRTABLE]
+API_KEY = "your_airtable_api_key"
+BASE_ID = "app_..."
+TABLE = "Mapping"  # or table ID
+VIEW = ""  # optional
+CACHE_PATH = "data/airtable_mapping.json"
+APPROVALS_TABLE = "Approvals"
+
+# Optional
+OPENAI_API_KEY = "sk-..."
+GOOGLE_SERVICE_ACCOUNT_JSON = """{ ...service account json... }"""
+```
+
+The app automatically prefers `st.secrets` over OS env vars (see `src/config.py`), so deployment requires no code changes.
