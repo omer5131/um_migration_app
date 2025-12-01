@@ -413,8 +413,8 @@ NESTED_PLAN_JSON: Dict[str, dict | list] = {
             "visualLinkAnalysis",
             "weatherLayer",
             "uboData",
-            "cddScreening",
-        ],
+            "cddScreening"
+  ],
     },
     "EXTRAS": {
         "Extras": [
