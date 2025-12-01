@@ -519,31 +519,7 @@ def main():
 
         # Quick refresh for Airtable cache from within this tab
         src_label = str(data.get('_source', ''))
-        if src_label.startswith('airtable_cache') or src_label.startswith('airtable_live'):
-            col_r1, col_r2 = st.columns([1,3])
-            with col_r1:
-                if st.button("Refresh Airtable Cache"):
-                    try:
-                        # Prefer current Airtable settings from session (or fallback to env)
-                        _manual = st.session_state.get('airtable_manual', {}) or {}
-                        ak = _manual.get('api_key') or AT_CFG.get('API_KEY')
-                        bid = _manual.get('base_id') or AT_CFG.get('BASE_ID')
-                        tbl = _manual.get('table') or AT_CFG.get('TABLE')
-                        vw = (_manual.get('view') or AT_CFG.get('VIEW')) or None
-                        cp = _manual.get('cache_path') or AT_CFG.get('CACHE_PATH') or 'data/airtable_mapping.json'
-                        if not (ak and bid and tbl):
-                            st.error("Missing Airtable config (API_KEY/BASE_ID/TABLE). Go to Data Sources → Airtable and Save.")
-                        else:
-                            cfg = ATConfig(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
-                            with st.spinner("Refreshing Airtable cache..."):
-                                df = _at_load(cfg, cp, ttl_seconds=0)
-                            # Preserve current plan_json in session
-                            plan_json_active = get_active_plan_json()
-                            st.session_state['data'] = {'mapping': df, 'plan_json': plan_json_active, '_source': 'airtable_live'}
-                            st.success("Airtable cache refreshed.")
-                            st.experimental_rerun()
-                    except Exception as e:
-                        st.error(f"Failed to refresh Airtable: {e}")
+        # Airtable cache refresh button removed; use Data Sources → Airtable → Save
 
         if st.button("Run Migration Logic"):
             results = []
