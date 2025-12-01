@@ -211,10 +211,11 @@ def main():
 
         if st.session_state["data"] is not None:
             d = st.session_state["data"]
-            acc_part = f", accounts={len(d['accounts'])}" if 'accounts' in d else ""
-            plan_count = len(d.get('plan_json', {})) if 'plan_json' in d else 0
+            mapping_len = len(d['mapping']) if isinstance(d.get('mapping'), pd.DataFrame) else 0
+            acc_part = f", accounts={len(d['accounts'])}" if isinstance(d.get('accounts'), pd.DataFrame) else ""
+            plan_count = len(d.get('plan_json', {})) if isinstance(d.get('plan_json'), dict) else 0
             st.info(
-                f"Loaded mapping={len(d['mapping'])}, plans={plan_count}{acc_part}."
+                f"Loaded mapping={mapping_len}, plans={plan_count}{acc_part}."
             )
             # Data source banner
             ds = d.get('_source') or st.session_state.get('source') or 'unknown'
@@ -378,6 +379,23 @@ def main():
         if not data:
             st.warning("Please load data first in 'Data Sources'.")
             st.stop()
+
+        # Ensure mapping exists; if session only had plan_json, try to backfill
+        if 'mapping' not in data or not isinstance(data.get('mapping'), pd.DataFrame):
+            try:
+                loaded = load_all_data()
+                if loaded and isinstance(loaded.get('mapping'), pd.DataFrame):
+                    # Preserve any in-session plan_json override
+                    if isinstance(data.get('plan_json'), dict):
+                        loaded['plan_json'] = data['plan_json']
+                    data = loaded
+                    st.session_state['data'] = data
+                else:
+                    st.warning("No mapping table loaded yet. Go to 'Data Sources' to connect Airtable or Sheets.")
+                    st.stop()
+            except Exception:
+                st.warning("Failed to load mapping. Go to 'Data Sources'.")
+                st.stop()
 
         logic_engine = MigrationLogic(None, data.get('plan_json'), cost_bloat_weight=paid_bloat_penalty)
         agent = ReviewAgent(openai_key)
