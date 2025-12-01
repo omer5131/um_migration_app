@@ -280,8 +280,8 @@ def main():
                 except Exception as e:
                     return False, str(e)
 
-            # Single action: Save settings and refresh cache in the background
-            if st.button("Save & Cache Airtable Settings"):
+            # Single action: Save and refresh cache (in the background-like flow)
+            if st.button("Save"):
                 updates = {
                     'AIRTABLE_API_KEY': (st.session_state['airtable_manual']['api_key'] or env_api_key),
                     'AIRTABLE_BASE_ID': (st.session_state['airtable_manual']['base_id'] or env_base_id),
@@ -303,9 +303,11 @@ def main():
                             st.warning("Saved to .env, but missing required fields to refresh cache (API_KEY/BASE_ID/TABLE).")
                         else:
                             cfg = _ATCfg(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
-                            # Force refresh of cache in the background (blocking call here)
-                            _ = _at_load(cfg, cp, ttl_seconds=0)
-                            st.success("Saved settings and refreshed Airtable cache. Reload app to use the new data.")
+                            with st.spinner("Saving and refreshing Airtable cache..."):
+                                df = _at_load(cfg, cp, ttl_seconds=0)
+                                # Update app data immediately so it is used everywhere
+                                st.session_state['data'] = {'mapping': df, 'plan_json': get_active_plan_json(), '_source': 'airtable_live'}
+                            st.success("Saved and refreshed Airtable cache.")
                             st.caption(f"Cache path: {cp}")
                     except Exception as e:
                         st.warning(f"Saved to .env, but cache refresh failed: {e}")
@@ -517,19 +519,28 @@ def main():
 
         # Quick refresh for Airtable cache from within this tab
         src_label = str(data.get('_source', ''))
-        if src_label.startswith('airtable_cache'):
+        if src_label.startswith('airtable_cache') or src_label.startswith('airtable_live'):
             col_r1, col_r2 = st.columns([1,3])
             with col_r1:
                 if st.button("Refresh Airtable Cache"):
                     try:
-                        from src.data_loader import load_from_airtable as _load_at
-                        refreshed = _load_at(refresh=True, ttl_seconds=None)
-                        if refreshed and isinstance(refreshed, dict):
-                            # keep existing plan_json in session if edited, otherwise use refreshed
-                            if st.session_state.get('data') and st.session_state['data'].get('plan_json'):
-                                refreshed['plan_json'] = st.session_state['data']['plan_json']
-                            st.session_state['data'] = refreshed
-                            st.success("Airtable cache refreshed. Data source is now 'airtable_live'.")
+                        # Prefer current Airtable settings from session (or fallback to env)
+                        _manual = st.session_state.get('airtable_manual', {}) or {}
+                        ak = _manual.get('api_key') or AT_CFG.get('API_KEY')
+                        bid = _manual.get('base_id') or AT_CFG.get('BASE_ID')
+                        tbl = _manual.get('table') or AT_CFG.get('TABLE')
+                        vw = (_manual.get('view') or AT_CFG.get('VIEW')) or None
+                        cp = _manual.get('cache_path') or AT_CFG.get('CACHE_PATH') or 'data/airtable_mapping.json'
+                        if not (ak and bid and tbl):
+                            st.error("Missing Airtable config (API_KEY/BASE_ID/TABLE). Go to Data Sources → Airtable and Save.")
+                        else:
+                            cfg = ATConfig(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
+                            with st.spinner("Refreshing Airtable cache..."):
+                                df = _at_load(cfg, cp, ttl_seconds=0)
+                            # Preserve current plan_json in session
+                            plan_json_active = get_active_plan_json()
+                            st.session_state['data'] = {'mapping': df, 'plan_json': plan_json_active, '_source': 'airtable_live'}
+                            st.success("Airtable cache refreshed.")
                             st.experimental_rerun()
                     except Exception as e:
                         st.error(f"Failed to refresh Airtable: {e}")
