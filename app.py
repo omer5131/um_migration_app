@@ -280,7 +280,7 @@ def main():
                 except Exception as e:
                     return False, str(e)
 
-            # Single Save button for now
+            # Save settings to .env for future runs
             if st.button("Save Airtable Settings to .env"):
                     updates = {
                         'AIRTABLE_API_KEY': (st.session_state['airtable_manual']['api_key'] or env_api_key),
@@ -295,6 +295,28 @@ def main():
                         st.success("Saved to .env (keep it uncommitted). Reload app to pick up env.")
                     else:
                         st.error(f"Failed to write .env: {err}")
+
+            # Load now from .env (cache only) without full app reload
+            if st.button("Load Airtable Now (from .env cache)"):
+                try:
+                    import importlib
+                    import src.config as _cfg_mod
+                    _cfg_mod = importlib.reload(_cfg_mod)
+                    from src.config import AIRTABLE as _AT2
+                    ak = _AT2.get('API_KEY', '')
+                    bid = _AT2.get('BASE_ID', '')
+                    tbl = _AT2.get('TABLE', '')
+                    vw = _AT2.get('VIEW', '') or None
+                    cp = _AT2.get('CACHE_PATH', 'data/airtable_mapping.json')
+                    if not (ak and bid and tbl):
+                        st.error("Please set AIRTABLE_API_KEY, AIRTABLE_BASE_ID and AIRTABLE_TABLE in .env or Secrets.")
+                    else:
+                        cfg = _ATCfg(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
+                        df = _at_load(cfg, cp, ttl_seconds=None)
+                        st.session_state['data'] = {'mapping': df, 'plan_json': get_flat_plan_json(), '_source': f"airtable_cache:{cp}"}
+                        st.success("Loaded Airtable mapping from .env (cache).")
+                except Exception as e:
+                    st.error(f"Load error: {e}")
 
         
 
