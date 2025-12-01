@@ -52,7 +52,13 @@ def main():
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
     st.sidebar.header("Configuration")
-    openai_key = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
+    openai_key_input = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
+    # Fallback to Streamlit secrets if input is empty
+    try:
+        from src.config import OPENAI_API_KEY as _OA
+    except Exception:
+        _OA = ""
+    openai_key = openai_key_input or _OA
     approved_by = st.sidebar.text_input("Your Name (for approvals)")
     use_ai_bulk = st.sidebar.checkbox("Use AI for recommendations (beta)", value=False)
     paid_bloat_penalty = st.sidebar.slider(
@@ -131,11 +137,19 @@ def main():
                 creds_json = st.text_area("Service Account JSON", height=220)
 
             if st.button("Connect & Load Sheets"):
-                if not creds_json.strip():
-                    st.error("Service Account JSON is required.")
+                # Allow fallback to Streamlit secrets without exposing the content
+                effective_creds = creds_json.strip()
+                if not effective_creds:
+                    try:
+                        from src.config import GOOGLE_SERVICE_ACCOUNT_JSON as _GS
+                        effective_creds = _GS.strip()
+                    except Exception:
+                        effective_creds = ""
+                if not effective_creds:
+                    st.error("Service Account JSON is required (paste it here or set GOOGLE_SERVICE_ACCOUNT_JSON in secrets).")
                 else:
                     try:
-                        client = make_client(creds_json)
+                        client = make_client(effective_creds)
                         key = extract_key_from_url(sheet_url)
                         if not key:
                             st.error("Could not extract spreadsheet key from the URL.")
