@@ -22,6 +22,30 @@ from src.airtable import AirtableConfig as ATConfig, upsert_single as at_upsert_
 from src.plan_definitions import get_flat_plan_json
 from src.json_reorder import reorder_features_json
 
+# Display mapping for preview JSON keys
+_DISPLAY_KEY_MAP = {
+    "extras": "add-ons to compatability",
+    "bloat_features": "features on the house",
+}
+
+
+def _preview_with_display_names(data):
+    """Order keys per spec, then rename display keys for preview."""
+    ordered = reorder_features_json(data)
+    order = [
+        "plan",
+        "extras",
+        "bloat_features",
+        "bloat_costly",
+        "gaFeatures",
+        "irrelevantFeatures",
+    ]
+    out = {}
+    for k in order:
+        display = _DISPLAY_KEY_MAP.get(k, k)
+        out[display] = ordered.get(k, []) if k != "plan" else ordered.get(k)
+    return out
+
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
 def main():
@@ -894,7 +918,7 @@ def main():
                 if selected_idx is not None:
                     cand = candidates[selected_idx]
                     st.caption("Preview of selected candidate")
-                    st.json(reorder_features_json(cand))
+                    st.json(_preview_with_display_names(cand))
                     if st.button("Approve Selected Option & Lock"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
@@ -950,7 +974,7 @@ def main():
                     irr_feats = cls['irrelevant']
                     st.caption(parsed.get('reasoning', ''))
                     st.json(
-                        reorder_features_json(
+                        _preview_with_display_names(
                             {
                                 'plan': plan_name,
                                 'extras': sorted(list(cls['extras_norm'])),
