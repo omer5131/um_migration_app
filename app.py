@@ -19,7 +19,7 @@ from src.persistence import ApprovalsStore
 from src.sheets import make_client, load_from_sheets, extract_key_from_url, write_dataframe
 from src.config import AIRTABLE as AT_CFG
 from src.airtable import AirtableConfig as ATConfig, upsert_single as at_upsert_single, upsert_dataframe as at_upsert_df
-from src.plan_definitions import get_flat_plan_json
+from src.plan_definitions import get_flat_plan_json, get_active_plan_json
 from src.json_reorder import reorder_features_json
 
 # Display mapping for preview JSON keys
@@ -524,6 +524,11 @@ def main():
                 st.warning("Failed to load mapping. Go to 'Data Sources'.")
                 st.stop()
 
+        # Always refresh plan mapping from data/plan_json.json if present
+        try:
+            data['plan_json'] = get_active_plan_json()
+        except Exception:
+            data['plan_json'] = data.get('plan_json') or get_flat_plan_json()
         logic_engine = MigrationLogic(None, data.get('plan_json'), cost_bloat_weight=paid_bloat_penalty)
         agent = ReviewAgent(openai_key)
         decision_agent = DecisionAgent(openai_key)
@@ -909,9 +914,12 @@ def main():
 
                 st.markdown("---")
                 st.markdown("**Choose from Candidates**")
-                candidates = row['Raw Rec'].get('all_candidates', []) if isinstance(row['Raw Rec'], dict) else []
+                # Show all plan applications and their impact, not only filtered finals
+                candidates = []
+                if isinstance(row['Raw Rec'], dict):
+                    candidates = row['Raw Rec'].get('all_plans') or row['Raw Rec'].get('all_candidates', [])
                 option_labels = [
-                    f"{c.get('plan')} (bloat={c.get('bloat_count', len(c.get('bloat_features', [])))}, extras={c.get('extras_count', len(c.get('extras', [])))})"
+                    f"{c.get('plan')} (extras={c.get('extras_count', len(c.get('extras', [])))}, bloat={c.get('bloat_count', len(c.get('bloat_features', [])))}, paid_bloat={c.get('bloat_costly_count', len(c.get('bloat_costly', [])))})"
                     for c in candidates
                 ]
                 selected_idx = st.selectbox("Candidate Options", list(range(len(candidates))), format_func=lambda i: option_labels[i] if i < len(option_labels) else "") if candidates else None

@@ -77,9 +77,8 @@ class DecisionAgent:
         user_list = self._parse_features(user_features)
         user_set = set(user_list)
 
-        candidates = logic_result.get("all_candidates", [])
-        # Enforce red line: filter out any candidate with paid bloat if present
-        candidates = [c for c in candidates if not c.get("bloat_costly")]
+        # Use all options (including those with paid bloat) for full visibility
+        candidates = logic_result.get("all_plans") or logic_result.get("all_candidates", [])
         if not candidates and "recommended_plan" in logic_result:
             candidates = [
                 {
@@ -138,7 +137,7 @@ class DecisionAgent:
         **Account:** {account_name} (SubType: {subtype})
         **Current Features:** {user_list}
 
-        **Available Plan Options:**
+        **Available Plan Options (including some with Paid Bloat):**
         {candidates_context}
 
         **Task:** Compare the options above. Reject options with any Paid Bloat. From the remainder, select the plan that minimizes Extras first, then minimizes Bloat.

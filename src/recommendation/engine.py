@@ -172,8 +172,8 @@ class MigrationLogic:
                 "migration_confidence": 0.0,
             }
 
-        analyses: List[dict] = []
-        valid_candidates: List[dict] = []
+        analyses: List[dict] = []  # all relevant plans with impact (including paid bloat)
+        valid_candidates: List[dict] = []  # filtered list used for auto-recommendation
         all_plan_features: Set[str] = set().union(*self.plan_definitions.values()) if self.plan_definitions else set()
         synonym_hits = {f for f in raw_user_features if canonicalize(f, self.synonyms) != clean_feature_name(f)}
         for plan in candidates:
@@ -190,8 +190,6 @@ class MigrationLogic:
             bloat = sorted(plan_norm - user_norm)
             cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
             bloat_costly = [b for b in bloat if str(b).strip().lower() in cost_set]
-            if len(bloat_costly) > 0:
-                continue
             bloat_weighted = len(bloat) + self.cost_bloat_weight * len(bloat_costly)
 
             missing_critical = 0
@@ -229,7 +227,8 @@ class MigrationLogic:
                 "missingFeatures": extras,
             }
             analyses.append(row_data)
-            valid_candidates.append(row_data)
+            if len(bloat_costly) == 0:
+                valid_candidates.append(row_data)
 
         if not valid_candidates:
             return {
@@ -305,6 +304,27 @@ class MigrationLogic:
                     "missingFeatures": a.get("missingFeatures", []),
                 }
                 for a in valid_candidates
+            ],
+            # New: include all relevant plans regardless of paid bloat
+            "all_plans": [
+                {
+                    "plan": a["plan"],
+                    "extras": a["extras"],
+                    "extras_weighted": a["extras_weighted"],
+                    "bloat_features": a["bloat_features"],
+                    "bloat_count": a["bloat_score"],
+                    "bloat_costly": a["bloat_costly"],
+                    "bloat_costly_count": a["bloat_costly_count"],
+                    "bloat_weighted": a["bloat_weighted"],
+                    "coverage_count": a["coverage_count"],
+                    "business_value_score": a["business_value_score"],
+                    "gaFeatures": a.get("gaFeatures", []),
+                    "irrelevantFeatures": a.get("irrelevantFeatures", []),
+                    "planFeatures": a.get("planFeatures", []),
+                    "accountFeatures": a.get("accountFeatures", []),
+                    "missingFeatures": a.get("missingFeatures", []),
+                }
+                for a in analyses
             ],
             # New sections for GA/Irrelevant and normalized views
             "gaFeatures": winner.get("gaFeatures", []),

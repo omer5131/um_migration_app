@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 from src.config import FILES, AIRTABLE
 from src.airtable import AirtableConfig, load_cached_or_fetch
-from src.plan_definitions import get_flat_plan_json
+from src.plan_definitions import get_flat_plan_json, get_active_plan_json
 import glob
 
 
@@ -237,7 +237,7 @@ def load_all_data():
                 data['accounts'] = pd.read_csv(FILES['accounts'])
             except FileNotFoundError:
                 data['accounts'] = pd.DataFrame()
-            data['plan_json'] = get_flat_plan_json()
+            data['plan_json'] = get_active_plan_json()
             return data
 
     # Fallback to CSVs for mapping/accounts
@@ -256,7 +256,7 @@ def load_all_data():
         data['accounts'] = pd.DataFrame()
 
     # Use hard-coded plan mapping
-    data['plan_json'] = get_flat_plan_json()
+    data['plan_json'] = get_active_plan_json()
     return data
 
 
@@ -275,7 +275,7 @@ def load_from_csv_paths(accounts_path: str, mapping_path: str):
     return {
         'accounts': accounts_df,
         'mapping': mapping_df,
-        'plan_json': get_flat_plan_json(),
+        'plan_json': get_active_plan_json(),
     }
 
 
@@ -301,7 +301,7 @@ def load_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
     src = "airtable_live" if refresh or ttl == 0 else "airtable_cached"
     return {
         'mapping': df,
-        'plan_json': get_flat_plan_json(),
+        'plan_json': get_active_plan_json(),
         '_source': src,
     }
 
@@ -329,7 +329,7 @@ def load_from_excel(file_bytes: bytes, sheet_map: dict):
         if not sheet:
             raise ValueError("Missing sheet selection for 'mapping'")
         dfs['mapping'] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
-        dfs['plan_json'] = get_flat_plan_json()
+        dfs['plan_json'] = get_active_plan_json()
         dfs['_source'] = f"excel_upload:{sheet}"
         return dfs
     except FileNotFoundError as e:

@@ -364,7 +364,9 @@
     ],
     "Oil & Energy Advanced": [
       "liveChat",
+      "vesselsLists",
       "complianceLabel",
+      "complianceMode",
       "enableExportCompanyPdfReport",
       "sendHeartbeat",
       "portStateControl",
@@ -382,35 +384,15 @@
       "nasAddVesselsToVoi",
       "visualLinkAnalysis",
       "weatherLayer",
-      "uboData",
-      "cddScreening"
-    ],
-    "Oil & Energy Premium": [
-    "liveChat",
-    "complianceLabel",
-    "enableExportCompanyPdfReport",
-    "sendHeartbeat",
-    "portStateControl",
-    "userAlreadyLoggedInWarning",
-    "companyProfile",
-    "exploreCompanies",
-    "portProfile",
-    "savedQueriesNotifications",
-    "hideMapTimelineOnVesselProfile",
-    "newNasSideBarDesign",
-    "wetCargoData",
-    "maiExpertVesselSummary",
-    "maiExpertVesselAdverseMedia",
-    "shadowFleetVOIs",
-    "nasAddVesselsToVoi",
-    "visualLinkAnalysis",
-    "weatherLayer",
-    "uboData",
-    "cddScreening"
+      "hideBorderSecurityRisk",
+      "hideRuleEngine",
+      "hideSafetyRisk"
     ],
     "Oil & Energy Premium": [
       "liveChat",
+      "vesselsLists",
       "complianceLabel",
+      "complianceMode",
       "enableExportCompanyPdfReport",
       "sendHeartbeat",
       "portStateControl",
@@ -429,7 +411,10 @@
       "visualLinkAnalysis",
       "weatherLayer",
       "uboData",
-      "cddScreening"
+      "cddScreening",
+      "hideBorderSecurityRisk",
+      "hideRuleEngine",
+      "hideSafetyRisk"
     ]
   },
 
@@ -440,7 +425,7 @@
       "uboData",
       "exportCenter",
       "newsFeed",
-      "VLA",
+      "visualLinkAnalysis",
       "stsClassification",
       "AgGrid",
       "nasPremiumCsvColumns",
