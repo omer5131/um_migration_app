@@ -74,7 +74,8 @@ def main():
         nav_index = 0
     else:
         nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
-        nav_index = 1
+        # When Data Sources is available, make it the default selection
+        nav_index = 0
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
     st.sidebar.header("Configuration")
@@ -114,7 +115,8 @@ def main():
 
     if tab == "Data Sources":
         st.subheader("Connect Data Sources")
-        source = st.radio("Select data source", ["Excel Workbook", "CSV Files (default)", "Airtable", "Google Sheets"], index=0)
+        # Make Airtable the first and default option
+        source = st.radio("Select data source", ["Airtable", "Excel Workbook", "CSV Files (default)", "Google Sheets"], index=0)
 
         if source == "Excel Workbook":
             upl = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
