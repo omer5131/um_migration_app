@@ -177,35 +177,137 @@ def main():
         else:  # Airtable
             from src.config import AIRTABLE as AT
             from src.data_loader import load_from_airtable
-            st.write("Use a cached Airtable table as the mapping source. Configure via environment variables.")
+            from src.airtable import AirtableConfig as _ATCfg, load_cached_or_fetch as _at_load
+
+            st.write("Connect to Airtable. If secrets are unavailable, enter credentials manually.")
+
+            # Pull current environment/secrets and prepare manual override state
+            env_api_key = AT.get('API_KEY', '')
+            env_base_id = AT.get('BASE_ID', '')
+            env_table = AT.get('TABLE', '')
+            env_view = AT.get('VIEW', '')
+            env_cache = AT.get('CACHE_PATH', 'data/airtable_mapping.json')
+            env_approvals = AT.get('APPROVALS_TABLE', 'Approvals')
+
+            st.session_state.setdefault('airtable_manual', {
+                'api_key': env_api_key,
+                'base_id': env_base_id,
+                'table': env_table,
+                'view': env_view,
+                'cache_path': env_cache,
+                'approvals_table': env_approvals,
+            })
+
+            missing_env = not (env_api_key and env_base_id and env_table)
+            st.caption("Enable editing to input credentials manually.")
+            edit_mode = st.checkbox("Edit values manually", value=missing_env)
+
             colA, colB = st.columns(2)
             with colA:
-                st.text_input("AIRTABLE_BASE_ID", value=AT.get('BASE_ID', ''), disabled=True)
-                st.text_input("AIRTABLE_TABLE (name or id)", value=AT.get('TABLE', ''), disabled=True)
-                st.text_input("AIRTABLE_VIEW (optional)", value=AT.get('VIEW', ''), disabled=True)
+                api_key = st.text_input("AIRTABLE_API_KEY", value=(st.session_state['airtable_manual']['api_key'] or env_api_key), type="password", disabled=not edit_mode)
+                base_id = st.text_input("AIRTABLE_BASE_ID", value=(st.session_state['airtable_manual']['base_id'] or env_base_id), disabled=not edit_mode)
+                table_name = st.text_input("AIRTABLE_TABLE (name or id)", value=(st.session_state['airtable_manual']['table'] or env_table), disabled=not edit_mode)
             with colB:
-                st.text_input("AIRTABLE_CACHE_PATH", value=AT.get('CACHE_PATH', 'data/airtable_mapping.json'), disabled=True)
-                st.caption("Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE, AIRTABLE_VIEW (optional) in your environment.")
+                view = st.text_input("AIRTABLE_VIEW (optional)", value=(st.session_state['airtable_manual']['view'] or env_view), disabled=not edit_mode)
+                cache_path = st.text_input("AIRTABLE_CACHE_PATH", value=(st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'), disabled=not edit_mode)
+                approvals_table = st.text_input("AIRTABLE_APPROVALS_TABLE", value=(st.session_state['airtable_manual']['approvals_table'] or env_approvals or 'Approvals'), disabled=not edit_mode)
 
-            c1, c2 = st.columns(2)
+            if edit_mode:
+                st.session_state['airtable_manual'] = {
+                    'api_key': (api_key or '').strip(),
+                    'base_id': (base_id or '').strip(),
+                    'table': (table_name or '').strip(),
+                    'view': (view or '').strip(),
+                    'cache_path': (cache_path or 'data/airtable_mapping.json').strip(),
+                    'approvals_table': (approvals_table or 'Approvals').strip(),
+                }
+
+            st.caption("Use the actions below with the values above. You can also save to .env for next runs (do not commit secrets).")
+
+            def _write_env(env_path: str, updates: dict[str, str]):
+                try:
+                    existing_lines = []
+                    kv = {}
+                    if os.path.exists(env_path):
+                        with open(env_path, 'r', encoding='utf-8') as f:
+                            for line in f.read().splitlines():
+                                existing_lines.append(line)
+                                if '=' in line and not line.strip().startswith('#'):
+                                    k, v = line.split('=', 1)
+                                    kv[k.strip()] = v
+                    kv.update(updates)
+                    seen = set()
+                    out = []
+                    for line in existing_lines:
+                        if '=' in line and not line.strip().startswith('#'):
+                            k, _ = line.split('=', 1)
+                            k = k.strip()
+                            if k in updates and k not in seen:
+                                out.append(f"{k}={kv[k]}")
+                                seen.add(k)
+                            else:
+                                out.append(line)
+                        else:
+                            out.append(line)
+                    for k in updates:
+                        if k not in seen:
+                            out.append(f"{k}={kv[k]}")
+                    with open(env_path, 'w', encoding='utf-8') as f:
+                        f.write("\n".join(out) + "\n")
+                    return True, None
+                except Exception as e:
+                    return False, str(e)
+
+            c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("Sync from Airtable (refresh cache)"):
                     try:
-                        data = load_from_airtable(refresh=True)
-                        if data:
-                            st.session_state["data"] = data
+                        ak = st.session_state['airtable_manual']['api_key'] or env_api_key
+                        bid = st.session_state['airtable_manual']['base_id'] or env_base_id
+                        tbl = st.session_state['airtable_manual']['table'] or env_table
+                        vw = st.session_state['airtable_manual']['view'] or env_view or None
+                        cp = st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'
+                        if not (ak and bid and tbl):
+                            st.error("Please fill AIRTABLE_API_KEY, AIRTABLE_BASE_ID and AIRTABLE_TABLE.")
+                        else:
+                            cfg = _ATCfg(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
+                            df = _at_load(cfg, cp, ttl_seconds=0)
+                            st.session_state['data'] = {'mapping': df, 'plan_json': get_flat_plan_json(), '_source': 'airtable_live'}
                             st.success("Synced from Airtable and loaded.")
                     except Exception as e:
                         st.error(f"Airtable sync error: {e}")
             with c2:
                 if st.button("Load from Airtable cache"):
                     try:
-                        data = load_from_airtable(refresh=False, ttl_seconds=None)
-                        if data:
-                            st.session_state["data"] = data
+                        ak = st.session_state['airtable_manual']['api_key'] or env_api_key
+                        bid = st.session_state['airtable_manual']['base_id'] or env_base_id
+                        tbl = st.session_state['airtable_manual']['table'] or env_table
+                        vw = st.session_state['airtable_manual']['view'] or env_view or None
+                        cp = st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'
+                        if not (ak and bid and tbl):
+                            st.error("Please fill AIRTABLE_API_KEY, AIRTABLE_BASE_ID and AIRTABLE_TABLE.")
+                        else:
+                            cfg = _ATCfg(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
+                            df = _at_load(cfg, cp, ttl_seconds=None)
+                            st.session_state['data'] = {'mapping': df, 'plan_json': get_flat_plan_json(), '_source': f"airtable_cache:{cp}"}
                             st.success("Loaded mapping from Airtable cache.")
                     except Exception as e:
                         st.error(f"Airtable cache load error: {e}")
+            with c3:
+                if st.button("Save to .env for future runs"):
+                    updates = {
+                        'AIRTABLE_API_KEY': (st.session_state['airtable_manual']['api_key'] or env_api_key),
+                        'AIRTABLE_BASE_ID': (st.session_state['airtable_manual']['base_id'] or env_base_id),
+                        'AIRTABLE_TABLE': (st.session_state['airtable_manual']['table'] or env_table),
+                        'AIRTABLE_VIEW': (st.session_state['airtable_manual']['view'] or env_view),
+                        'AIRTABLE_CACHE_PATH': (st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'),
+                        'AIRTABLE_APPROVALS_TABLE': (st.session_state['airtable_manual']['approvals_table'] or env_approvals or 'Approvals'),
+                    }
+                    ok, err = _write_env('.env', updates)
+                    if ok:
+                        st.success("Saved to .env (keep it uncommitted). Reload app to pick up env.")
+                    else:
+                        st.error(f"Failed to write .env: {err}")
 
         
 
@@ -593,9 +695,11 @@ def main():
             # Sync all approvals to Airtable (bulk upsert)
             if st.button("Sync approvals to Airtable"):
                 try:
-                    api_key = AT_CFG.get('API_KEY')
-                    base_id = AT_CFG.get('BASE_ID')
-                    approvals_table = AT_CFG.get('APPROVALS_TABLE', 'Approvals')
+                    # Prefer any manual overrides entered in Data Sources → Airtable
+                    _manual = st.session_state.get('airtable_manual', {}) or {}
+                    api_key = (_manual.get('api_key') or AT_CFG.get('API_KEY'))
+                    base_id = (_manual.get('base_id') or AT_CFG.get('BASE_ID'))
+                    approvals_table = (_manual.get('approvals_table') or AT_CFG.get('APPROVALS_TABLE', 'Approvals'))
                     if not (api_key and base_id and approvals_table):
                         st.error("Missing Airtable config for approvals table.")
                     else:
