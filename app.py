@@ -19,6 +19,7 @@ from src.persistence import ApprovalsStore
 from src.sheets import make_client, load_from_sheets, extract_key_from_url, write_dataframe
 from src.config import AIRTABLE as AT_CFG
 from src.airtable import AirtableConfig as ATConfig, upsert_single as at_upsert_single, upsert_dataframe as at_upsert_df
+from src.plan_definitions import get_flat_plan_json
 
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
@@ -43,10 +44,10 @@ def main():
     # --- Sidebar Config & Tabs ---
     st.sidebar.header("Navigation")
     if st.session_state.get("auto_airtable_ok"):
-        nav_options = ["Recommendations & Agent"]
+        nav_options = ["Recommendations & Agent", "Plan Mapping"]
         nav_index = 0
     else:
-        nav_options = ["Data Sources", "Recommendations & Agent"]
+        nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping"]
         nav_index = 1
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
@@ -70,6 +71,11 @@ def main():
             if os.path.exists("data/plan_json.json"):
                 with open("data/plan_json.json", "r") as f:
                     saved_plan_json = json.load(f)
+                # If file is nested family -> plan -> features, flatten it
+                if isinstance(saved_plan_json, dict) and any(isinstance(v, dict) for v in saved_plan_json.values()):
+                    from src.data_loader import flatten_family_plan_json
+                    flat, _extras = flatten_family_plan_json(saved_plan_json)
+                    saved_plan_json = flat
                 st.session_state["data"] = {"plan_json": saved_plan_json}
         except Exception:
             pass
@@ -147,6 +153,8 @@ def main():
                                 'updated_map_ws': updated_map_ws,
                                 'enable_write': enable_write,
                             }
+                            # Annotate source
+                            data['_source'] = f"gsheets:{map_ws}"
                             st.session_state["data"] = data
                             st.success("Sheets data loaded.")
                     except Exception as e:
@@ -194,6 +202,9 @@ def main():
             st.info(
                 f"Loaded mapping={len(d['mapping'])}, plans={plan_count}{acc_part}."
             )
+            # Data source banner
+            ds = d.get('_source') or st.session_state.get('source') or 'unknown'
+            st.info(f"Data source: {ds}")
 
             with st.expander("Plan → Features (JSON)", expanded=True):
                 st.json(d.get('plan_json', {}))
@@ -204,22 +215,17 @@ def main():
             plan_json_text = st.text_area("Plan JSON", value="{}", height=220)
             col_m1, col_m2 = st.columns(2)
             if col_m1.button("Use This Plan JSON"):
-                import json
                 try:
                     nested = json.loads(plan_json_text)
                     flat, extras = flatten_family_plan_json(nested)
                     if st.session_state.get("data") is None:
                         st.session_state["data"] = {}
                     st.session_state["data"]["plan_json"] = flat
-                    st.session_state["data"]["plan_json_raw"] = nested
                     try:
                         os.makedirs("data", exist_ok=True)
                         with open("data/plan_json.json", "w") as f:
                             json.dump(flat, f, indent=2)
-                        with open("data/plan_json_raw.json", "w") as f:
-                            json.dump(nested, f, indent=2)
                         st.success(f"Saved manual Plan JSON to data/plan_json.json ({len(flat)} plans). Extras captured: {len(extras)} items")
-                        # SQLite sync removed
                     except Exception as e:
                         st.warning(f"Loaded Plan JSON, but failed to persist to file: {e}")
                 except Exception as e:
@@ -228,20 +234,132 @@ def main():
                 try:
                     if os.path.exists("data/plan_json.json"):
                         os.remove("data/plan_json.json")
-                    if os.path.exists("data/plan_json_raw.json"):
-                        os.remove("data/plan_json_raw.json")
                     if st.session_state.get("data"):
                         st.session_state["data"].pop("plan_json", None)
-                        st.session_state["data"].pop("plan_json_raw", None)
-                    st.success("Cleared saved Plan JSON files.")
+                    st.success("Cleared saved Plan JSON file.")
                 except Exception as e:
                     st.error(f"Failed to clear saved Plan JSON: {e}")
 
         st.subheader("Approved Rows Store")
         st.dataframe(store.all())
 
+    elif tab == "Plan Mapping":
+        st.subheader("Plan <> Features Mapping")
+        st.caption("View and edit the plan to features mapping used by the recommendation engine.")
+
+        # Load current plan_json baseline
+        current_plan_json = None
+        # Prefer session state
+        if st.session_state.get("data") and isinstance(st.session_state['data'], dict):
+            current_plan_json = st.session_state['data'].get('plan_json')
+        # Fall back to file
+        if current_plan_json is None:
+            try:
+                if os.path.exists("data/plan_json.json"):
+                    with open("data/plan_json.json", "r", encoding="utf-8") as f:
+                        current_plan_json = json.load(f)
+                    # Flatten if nested
+                    if isinstance(current_plan_json, dict) and any(isinstance(v, dict) for v in current_plan_json.values()):
+                        flat, _extras = flatten_family_plan_json(current_plan_json)
+                        current_plan_json = flat
+            except Exception:
+                current_plan_json = None
+        # Fall back to hard-coded default
+        if current_plan_json is None:
+            current_plan_json = get_flat_plan_json()
+
+        # Keep an editable copy in session
+        st.session_state.setdefault('edit_plan_json', current_plan_json.copy())
+        edit_map: dict = st.session_state['edit_plan_json']
+
+        plans = sorted(list(edit_map.keys()))
+        if not plans:
+            st.info("No plans found. Use 'Add Plan' to create one.")
+        cols = st.columns(2)
+        with cols[0]:
+            selected_plan = st.selectbox("Select Plan", plans, index=0 if plans else None)
+            st.markdown("**Plan Actions**")
+            new_plan_name = st.text_input("Add Plan (name)", value="")
+            if st.button("Add Plan"):
+                name = new_plan_name.strip()
+                if not name:
+                    st.warning("Plan name cannot be empty.")
+                elif name in edit_map:
+                    st.warning("Plan already exists.")
+                else:
+                    edit_map[name] = []
+                    st.success(f"Added plan '{name}'.")
+                    st.rerun()
+
+            if selected_plan:
+                rename_to = st.text_input("Rename Selected Plan", value=selected_plan, key="rename_plan_input")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Rename Plan") and rename_to.strip() and rename_to.strip() != selected_plan:
+                        newn = rename_to.strip()
+                        if newn in edit_map:
+                            st.error("Target plan name already exists.")
+                        else:
+                            edit_map[newn] = edit_map.pop(selected_plan)
+                            st.success(f"Renamed '{selected_plan}' → '{newn}'.")
+                            st.rerun()
+                with c2:
+                    if st.button("Delete Plan"):
+                        edit_map.pop(selected_plan, None)
+                        st.success(f"Deleted plan '{selected_plan}'.")
+                        st.rerun()
+
+        with cols[1]:
+            if selected_plan:
+                st.markdown(f"**Features for:** {selected_plan}")
+                feats = list(dict.fromkeys(edit_map.get(selected_plan, [])))
+                feat_df = pd.DataFrame({"feature": feats})
+                edited_df = st.data_editor(
+                    feat_df,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key=f"features_editor_{selected_plan}",
+                )
+                # Normalize: strip, drop empty, dedupe preserving order
+                new_feats = [str(x).strip() for x in edited_df['feature'].tolist() if str(x).strip()]
+                edit_map[selected_plan] = list(dict.fromkeys(new_feats))
+
+        st.markdown("---")
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            if st.button("Save All Changes"):
+                try:
+                    os.makedirs("data", exist_ok=True)
+                    with open("data/plan_json.json", "w", encoding="utf-8") as f:
+                        json.dump(edit_map, f, indent=2)
+                    # Update session state so the engine uses latest
+                    st.session_state.setdefault('data', {})
+                    st.session_state['data']['plan_json'] = edit_map.copy()
+                    st.success("Saved to data/plan_json.json and updated session.")
+                except Exception as e:
+                    st.error(f"Failed to save: {e}")
+        with s2:
+            if st.button("Reload From File"):
+                try:
+                    if os.path.exists("data/plan_json.json"):
+                        with open("data/plan_json.json", "r", encoding="utf-8") as f:
+                            reloaded = json.load(f)
+                        st.session_state['edit_plan_json'] = reloaded
+                        st.success("Reloaded from data/plan_json.json.")
+                        st.rerun()
+                    else:
+                        st.info("No plan_json.json on disk; nothing to reload.")
+                except Exception as e:
+                    st.error(f"Failed to reload: {e}")
+        with s3:
+            if st.button("Reset To Defaults"):
+                default_map = get_flat_plan_json()
+                st.session_state['edit_plan_json'] = default_map
+                st.success("Reset mapping to hard-coded defaults (not saved yet).")
+                st.rerun()
+
     else:  # Recommendations & Agent
-        # Load data either from session or CSV fallback
+        # Load data either from session or fallback
         data = st.session_state.get("data") or load_all_data()
         if not data:
             st.warning("Please load data first in 'Data Sources'.")
@@ -251,6 +369,9 @@ def main():
         agent = ReviewAgent(openai_key)
         decision_agent = DecisionAgent(openai_key)
         st.session_state.setdefault('ai_decisions', {})
+
+        # Show data source banner
+        st.info(f"Data source: {data.get('_source', 'unknown')}")
 
         mapping = data['mapping']
         # Always use mapping (Account<>CSM<>Project) as the source of accounts
@@ -301,6 +422,25 @@ def main():
         st.info(
             f"Loaded {len(df)} accounts. Matrix contains {len(logic_engine.plan_definitions)} plan definitions."
         )
+
+        # Quick refresh for Airtable cache from within this tab
+        src_label = str(data.get('_source', ''))
+        if src_label.startswith('airtable_cache'):
+            col_r1, col_r2 = st.columns([1,3])
+            with col_r1:
+                if st.button("Refresh Airtable Cache"):
+                    try:
+                        from src.data_loader import load_from_airtable as _load_at
+                        refreshed = _load_at(refresh=True, ttl_seconds=None)
+                        if refreshed and isinstance(refreshed, dict):
+                            # keep existing plan_json in session if edited, otherwise use refreshed
+                            if st.session_state.get('data') and st.session_state['data'].get('plan_json'):
+                                refreshed['plan_json'] = st.session_state['data']['plan_json']
+                            st.session_state['data'] = refreshed
+                            st.success("Airtable cache refreshed. Data source is now 'airtable_live'.")
+                            st.experimental_rerun()
+                    except Exception as e:
+                        st.error(f"Failed to refresh Airtable: {e}")
 
         if st.button("Run Migration Logic"):
             results = []

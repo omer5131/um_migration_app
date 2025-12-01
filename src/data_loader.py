@@ -4,6 +4,7 @@ import streamlit as st
 from src.config import FILES, AIRTABLE
 from src.airtable import AirtableConfig, load_cached_or_fetch
 from src.plan_definitions import get_flat_plan_json
+import glob
 
 
 def _build_plan_json(plan_df: pd.DataFrame) -> dict:
@@ -150,9 +151,10 @@ def flatten_family_plan_json(nested: dict) -> tuple[dict, list]:
 def load_all_data():
     """Load mapping/accounts with preference for cached Airtable; fallback to CSVs.
 
-    - If `AIRTABLE['CACHE_PATH']` exists, load mapping from it.
-    - Otherwise, try to fetch from Airtable if credentials provided and persist cache.
-    - Finally, fallback to CSV files.
+    Load order:
+    1) Airtable cache (or live Airtable if configured)
+    2) Local Excel workbook found under data/ (best-effort sheet detection)
+    3) CSV fallback (legacy)
     """
     data = {}
 
@@ -166,6 +168,7 @@ def load_all_data():
                 payload = json.load(f)
             rows = payload.get("rows", [])
             data['mapping'] = pd.DataFrame(rows)
+            data['_source'] = f"airtable_cache:{cache_path}"
             used_airtable = True
         except Exception as e:
             st.warning(f"Airtable cache load failed, falling back to CSV: {e}")
@@ -181,14 +184,67 @@ def load_all_data():
             )
             df = load_cached_or_fetch(cfg, AIRTABLE['CACHE_PATH'], ttl_seconds=None)
             data['mapping'] = df
+            data['_source'] = "airtable_live"
             used_airtable = True
         except Exception as e:
             st.warning(f"Airtable fetch failed, falling back to CSV: {e}")
 
-    # Fallback to CSVs for mapping/accounts
+    # Fallback to a local Excel workbook under data/
     if not used_airtable:
+        excel_loaded = False
+        try:
+            # Look for an Excel that contains mapping in its name; otherwise any xlsx in data/
+            candidates = sorted(
+                glob.glob(os.path.join("data", "*.xlsx"))
+            )
+            # Prefer files that look like the Account Migration mapping
+            def _score(p: str) -> int:
+                name = os.path.basename(p).lower()
+                score = 0
+                for kw in ("account", "migration", "mapping"):
+                    if kw in name:
+                        score += 1
+                return score
+            candidates.sort(key=_score, reverse=True)
+
+            if candidates:
+                path = candidates[0]
+                xls = pd.ExcelFile(path)
+                sheets = xls.sheet_names
+                # Preferred sheet names
+                preferred = [
+                    "Account Migration mapping (9)",
+                    "Account<>CSM<>Project",
+                ]
+                sheet = next((s for s in preferred if s in sheets), None)
+                if not sheet:
+                    # Heuristic using existing helper
+                    guessed = suggest_excel_sheet_mapping(sheets)
+                    sheet = guessed.get('mapping') or (sheets[0] if sheets else None)
+                if sheet:
+                    df_map = pd.read_excel(path, sheet_name=sheet, engine='openpyxl')
+                    data['mapping'] = df_map
+                    data['_source'] = f"excel:{os.path.basename(path)}:{sheet}"
+                    excel_loaded = True
+        except Exception as e:
+            st.warning(f"Local Excel load failed, will try CSV fallback: {e}")
+
+        if not excel_loaded:
+            st.info("No suitable Excel found in data/. Trying CSV fallback.")
+        else:
+            # Accounts CSV is optional; if present, load
+            try:
+                data['accounts'] = pd.read_csv(FILES['accounts'])
+            except FileNotFoundError:
+                data['accounts'] = pd.DataFrame()
+            data['plan_json'] = get_flat_plan_json()
+            return data
+
+    # Fallback to CSVs for mapping/accounts
+    if not used_airtable and 'mapping' not in data:
         try:
             data['mapping'] = pd.read_csv(FILES['account_csm_project'])
+            data['_source'] = "csv"
         except FileNotFoundError as e:
             st.error(f"Missing File: {e}")
             return None
@@ -242,9 +298,11 @@ def load_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
     )
     ttl = 0 if refresh else ttl_seconds
     df = load_cached_or_fetch(cfg, AIRTABLE['CACHE_PATH'], ttl_seconds=ttl)
+    src = "airtable_live" if refresh or ttl == 0 else "airtable_cached"
     return {
         'mapping': df,
         'plan_json': get_flat_plan_json(),
+        '_source': src,
     }
 
 
@@ -272,6 +330,7 @@ def load_from_excel(file_bytes: bytes, sheet_map: dict):
             raise ValueError("Missing sheet selection for 'mapping'")
         dfs['mapping'] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
         dfs['plan_json'] = get_flat_plan_json()
+        dfs['_source'] = f"excel_upload:{sheet}"
         return dfs
     except FileNotFoundError as e:
         st.error(f"Missing File: {e}")
