@@ -386,119 +386,37 @@ def main():
         st.dataframe(store.all())
 
     elif tab == "Plan Mapping":
-        st.subheader("Plan <> Features Mapping")
-        st.caption("View and edit the plan to features mapping used by the recommendation engine.")
+        st.subheader("Plan Search")
+        st.caption("View plans and their features. Editing is disabled.")
 
-        # Load current plan_json baseline
-        current_plan_json = None
-        # Prefer session state
-        if st.session_state.get("data") and isinstance(st.session_state['data'], dict):
-            current_plan_json = st.session_state['data'].get('plan_json')
-        # Fall back to file
-        if current_plan_json is None:
-            try:
-                if os.path.exists("data/plan_json.json"):
-                    with open("data/plan_json.json", "r", encoding="utf-8") as f:
-                        current_plan_json = json.load(f)
-                    # Flatten if nested
-                    if isinstance(current_plan_json, dict) and any(isinstance(v, dict) for v in current_plan_json.values()):
-                        flat, _extras = flatten_family_plan_json(current_plan_json)
-                        current_plan_json = flat
-            except Exception:
-                current_plan_json = None
-        # Fall back to hard-coded default
-        if current_plan_json is None:
-            current_plan_json = get_flat_plan_json()
+        # Always use the active plan mapping (file-backed) for display
+        try:
+            plan_map = get_active_plan_json()
+        except Exception:
+            plan_map = get_flat_plan_json()
 
-        # Keep an editable copy in session
-        st.session_state.setdefault('edit_plan_json', current_plan_json.copy())
-        edit_map: dict = st.session_state['edit_plan_json']
+        plans = sorted(plan_map.keys())
+        q = st.text_input("Search plans or features", placeholder="Type to search…")
 
-        plans = sorted(list(edit_map.keys()))
-        if not plans:
-            st.info("No plans found. Use 'Add Plan' to create one.")
-        cols = st.columns(2)
-        with cols[0]:
-            selected_plan = st.selectbox("Select Plan", plans, index=0 if plans else None)
-            st.markdown("**Plan Actions**")
-            new_plan_name = st.text_input("Add Plan (name)", value="")
-            if st.button("Add Plan"):
-                name = new_plan_name.strip()
-                if not name:
-                    st.warning("Plan name cannot be empty.")
-                elif name in edit_map:
-                    st.warning("Plan already exists.")
-                else:
-                    edit_map[name] = []
-                    st.success(f"Added plan '{name}'.")
-                    st.rerun()
+        def matches(plan: str, feats: list[str], query: str) -> bool:
+            if not query:
+                return True
+            s = query.lower().strip()
+            if s in plan.lower():
+                return True
+            return any(s in str(f).lower() for f in feats)
 
+        filtered = [p for p in plans if matches(p, plan_map.get(p, []), q)]
+        st.caption(f"{len(filtered)} of {len(plans)} plans match")
+
+        left, right = st.columns([1, 2])
+        with left:
+            selected_plan = st.selectbox("Plans", filtered, index=0 if filtered else None)
+        with right:
             if selected_plan:
-                rename_to = st.text_input("Rename Selected Plan", value=selected_plan, key="rename_plan_input")
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("Rename Plan") and rename_to.strip() and rename_to.strip() != selected_plan:
-                        newn = rename_to.strip()
-                        if newn in edit_map:
-                            st.error("Target plan name already exists.")
-                        else:
-                            edit_map[newn] = edit_map.pop(selected_plan)
-                            st.success(f"Renamed '{selected_plan}' → '{newn}'.")
-                            st.rerun()
-                with c2:
-                    if st.button("Delete Plan"):
-                        edit_map.pop(selected_plan, None)
-                        st.success(f"Deleted plan '{selected_plan}'.")
-                        st.rerun()
-
-        with cols[1]:
-            if selected_plan:
-                st.markdown(f"**Features for:** {selected_plan}")
-                feats = list(dict.fromkeys(edit_map.get(selected_plan, [])))
-                feat_df = pd.DataFrame({"feature": feats})
-                edited_df = st.data_editor(
-                    feat_df,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    key=f"features_editor_{selected_plan}",
-                )
-                # Normalize: strip, drop empty, dedupe preserving order
-                new_feats = [str(x).strip() for x in edited_df['feature'].tolist() if str(x).strip()]
-                edit_map[selected_plan] = list(dict.fromkeys(new_feats))
-
-        st.markdown("---")
-        s1, s2, s3 = st.columns(3)
-        with s1:
-            if st.button("Save All Changes"):
-                try:
-                    os.makedirs("data", exist_ok=True)
-                    with open("data/plan_json.json", "w", encoding="utf-8") as f:
-                        json.dump(edit_map, f, indent=2)
-                    # Update session state so the engine uses latest
-                    st.session_state.setdefault('data', {})
-                    st.session_state['data']['plan_json'] = edit_map.copy()
-                    st.success("Saved to data/plan_json.json and updated session.")
-                except Exception as e:
-                    st.error(f"Failed to save: {e}")
-        with s2:
-            if st.button("Reload From File"):
-                try:
-                    if os.path.exists("data/plan_json.json"):
-                        with open("data/plan_json.json", "r", encoding="utf-8") as f:
-                            reloaded = json.load(f)
-                        st.session_state['edit_plan_json'] = reloaded
-                        st.success("Reloaded from data/plan_json.json.")
-                        st.rerun()
-                    else:
-                        st.info("No plan_json.json on disk; nothing to reload.")
-                except Exception as e:
-                    st.error(f"Failed to reload: {e}")
-        with s3:
-            if st.button("Reset To Defaults"):
-                default_map = get_flat_plan_json()
-                st.session_state['edit_plan_json'] = default_map
-                st.success("Reset mapping to hard-coded defaults (not saved yet).")
-                st.rerun()
+                feats = plan_map.get(selected_plan, [])
+                st.markdown(f"**Features in {selected_plan} ({len(feats)}):**")
+                st.dataframe(pd.DataFrame({"feature": feats}), use_container_width=True)
 
     else:  # Recommendations & Agent
         # Load data either from session or fallback
