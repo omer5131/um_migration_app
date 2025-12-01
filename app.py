@@ -56,7 +56,8 @@ def main():
         st.session_state["auto_airtable_attempted"] = True
         try:
             from src.data_loader import load_from_airtable
-            data = load_from_airtable(refresh=False, ttl_seconds=None)
+            # Auto-submit Airtable option on app load using configured details
+            data = load_from_airtable(refresh=True, ttl_seconds=None)
             if data and isinstance(data, dict) and 'mapping' in data:
                 st.session_state["data"] = data
                 st.session_state["source"] = "airtable"
