@@ -2,11 +2,14 @@ import os
 import json
 import time
 from typing import Dict, Optional, List
+from pathlib import Path
 
 import pandas as pd
 
 
-DEFAULT_PATH = os.path.join("data", "approvals.csv")
+# Resolve to repository root/data/approvals.csv regardless of working directory
+_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PATH = str(_ROOT / "data" / "approvals.csv")
 
 
 class ApprovalsStore:
@@ -92,4 +95,3 @@ class ApprovalsStore:
 
     def all(self) -> pd.DataFrame:
         return self._df.copy()
-

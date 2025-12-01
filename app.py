@@ -70,10 +70,10 @@ def main():
     # --- Sidebar Config & Tabs ---
     st.sidebar.header("Navigation")
     if st.session_state.get("auto_airtable_ok"):
-        nav_options = ["Recommendations & Agent", "Plan Mapping"]
+        nav_options = ["Recommendations & Agent", "Plan Mapping", "Approved"]
         nav_index = 0
     else:
-        nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping"]
+        nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
         nav_index = 1
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
@@ -419,7 +419,39 @@ def main():
                 st.markdown(f"**Features in {selected_plan} ({len(feats)}):**")
                 st.dataframe(pd.DataFrame({"feature": feats}), use_container_width=True)
 
-    else:  # Recommendations & Agent
+    elif tab == "Approved":
+        st.subheader("Approved Rows Store")
+        try:
+            df_appr = store.all()
+        except Exception:
+            df_appr = None
+        if df_appr is None or df_appr.empty:
+            st.info("No approvals saved yet.")
+        else:
+            # Add a search box to filter approvals
+            q = st.text_input("Search approvals", placeholder="Filter by account, subtype, plan, etc.")
+            view = df_appr.copy()
+            # Show a human-readable timestamp
+            try:
+                view["Approved At (UTC)"] = pd.to_datetime(view["Approved At"], unit="s", utc=True)
+            except Exception:
+                pass
+            if q:
+                s = q.strip().lower()
+                mask = view.astype(str).apply(lambda col: col.str.lower().str.contains(s, na=False))
+                view = view[mask.any(axis=1)]
+            st.caption(f"{len(view)} approval(s)")
+            st.dataframe(view, use_container_width=True)
+            # Download CSV of current view
+            csv_bytes = view.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download approvals CSV",
+                data=csv_bytes,
+                file_name="approvals.csv",
+                mime="text/csv",
+            )
+
+    elif tab == "Recommendations & Agent":
         # Load data either from session or fallback
         data = st.session_state.get("data") or load_all_data()
         if not data:
@@ -803,6 +835,7 @@ def main():
                             approved_by=approved_by.strip(),
                         )
                         st.success("Saved and locked. Re-run logic to see locked status in table.")
+                        st.caption(f"Approvals CSV updated at: {store.path}")
                         # Auto-save updated Excel snapshot
                         try:
                             st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
@@ -858,6 +891,7 @@ def main():
                                 approved_by=approved_by.strip(),
                             )
                             st.success("Selected candidate approved and locked.")
+                            st.caption(f"Approvals CSV updated at: {store.path}")
                             try:
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
@@ -924,6 +958,7 @@ def main():
                                 approved_by=approved_by.strip(),
                             )
                             st.success("AI decision approved and locked.")
+                            st.caption(f"Approvals CSV updated at: {store.path}")
                             try:
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
