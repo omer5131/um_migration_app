@@ -342,6 +342,51 @@
     ]
   },
 
+  "Oil & Energy": {
+    "Oil & Energy Core": [
+      "hideRuleEngine",
+      "warRiskArea",
+      "complianceMode",
+      "softAoi",
+      "liveChat",
+      "complianceLabel",
+      "sendHeartbeat",
+      "portStateControl",
+      "userAlreadyLoggedInWarning",
+      "portProfile",
+      "savedQueriesNotifications",
+      "hideSafetyRisk",
+      "hideMapTimelineOnVesselProfile",
+      "newNasSideBarDesign",
+      "nasAccidentsActivity",
+      "shadowFleetVOIs",
+      "weatherLayer"
+    ],
+    "Oil & Energy Advanced": [
+      "liveChat",
+      "complianceLabel",
+      "enableExportCompanyPdfReport",
+      "sendHeartbeat",
+      "portStateControl",
+      "userAlreadyLoggedInWarning",
+      "companyProfile",
+      "exploreCompanies",
+      "portProfile",
+      "savedQueriesNotifications",
+      "hideMapTimelineOnVesselProfile",
+      "newNasSideBarDesign",
+      "wetCargoData",
+      "maiExpertVesselSummary",
+      "maiExpertVesselAdverseMedia",
+      "shadowFleetVOIs",
+      "nasAddVesselsToVoi",
+      "visualLinkAnalysis",
+      "weatherLayer",
+      "uboData",
+      "cddScreening"
+    ]
+  },
+
   "EXTRAS": {
     "Extras": [
       "cddScreening",

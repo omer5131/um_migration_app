@@ -116,7 +116,7 @@ def main():
             with col_a:
                 default_url = "https://docs.google.com/spreadsheets/d/12uSZdBwdR_RrbxTW7xrx0yuf9idXVEHIgjQ2nLm-KCE/edit?gid=1389810451"
                 sheet_url = st.text_input("Google Sheet URL (auto-detected)", value=default_url)
-                map_ws = st.text_input("Mapping Worksheet Name", value="Account<>CSM<>Project")
+                map_ws = st.text_input("Mapping Worksheet Name", value="Account Migration mapping (9)")
                 approvals_ws = st.text_input("Approvals Worksheet Name (write-back)", value="Approvals")
                 updated_map_ws = st.text_input("Updated Mapping Sheet (write-back)", value="Account<>CSM<>Project (updated)")
                 enable_write = st.checkbox("Enable write-back to Google Sheet", value=True,
@@ -258,16 +258,17 @@ def main():
         if 'name' not in df.columns and 'SalesForce_Account_NAME' in df.columns:
             df = df.rename(columns={'SalesForce_Account_NAME': 'name'})
 
-        # Pre-run filters: Actual CSM and Sub Type
+        # Pre-run filters: Actual CSM, Sub Type, and Segment
         csm_col = next((c for c in df.columns if 'csm' in c.lower()), None)
         subtype_col = (
             'Sub Type' if 'Sub Type' in df.columns else
             ('Subtype' if 'Subtype' in df.columns else
              next((c for c in df.columns if 'sub' in c.lower() and 'type' in c.lower()), None))
         )
+        segment_col = next((c for c in df.columns if 'segment' in c.lower()), None)
 
         st.markdown("**Filters (pre-run):**")
-        fcols = st.columns(2)
+        fcols = st.columns(3)
         with fcols[0]:
             if csm_col:
                 csm_vals = sorted([x for x in df[csm_col].dropna().unique()])
@@ -280,12 +281,20 @@ def main():
                 selected_subtypes = st.multiselect("Sub Type", subtype_vals, default=subtype_vals)
             else:
                 selected_subtypes = None
+        with fcols[2]:
+            if segment_col:
+                segment_vals = sorted([x for x in df[segment_col].dropna().unique()])
+                selected_segments = st.multiselect("Segment", segment_vals, default=segment_vals)
+            else:
+                selected_segments = None
 
         mask = pd.Series([True] * len(df))
         if selected_csms is not None:
             mask &= df[csm_col].isin(selected_csms)
         if selected_subtypes is not None:
             mask &= df[subtype_col].isin(selected_subtypes)
+        if segment_col and selected_segments is not None:
+            mask &= df[segment_col].isin(selected_segments)
         df_filtered = df[mask].reset_index(drop=True)
         st.caption(f"Filtered to {len(df_filtered)} rows from mapping tab.")
 
@@ -361,6 +370,7 @@ def main():
                     "Recommended Plan": rec['recommended_plan'],
                     "Extras (Add-ons)": ", ".join(rec['extras']),
                     "Extras Count": rec.get('extras_count', 0),
+                    "Bloat Features": ", ".join(rec.get('bloat_features', [])),
                     "Costly Bloat Count": rec.get('bloat_costly_count', 0),
                     "Bloat Score": rec.get('bloat_score', 0),
                     "Status": rec['status'],
