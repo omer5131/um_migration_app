@@ -425,7 +425,7 @@
       "newsFeed",
       "visualLinkAnalysis",
       "stsClassification",
-      "AgGrid",
+      "nasAgGridTable",
       "nasPremiumCsvColumns",
       "underwaterCables"
     ]
