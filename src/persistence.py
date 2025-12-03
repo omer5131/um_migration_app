@@ -1,7 +1,7 @@
 import os
 import json
 import time
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +10,7 @@ import pandas as pd
 # Resolve to repository root/data/approvals.csv regardless of working directory
 _ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PATH = str(_ROOT / "data" / "approvals.csv")
+BACKUP_PATH = str(_ROOT / "data" / "approvals_backup.csv")
 
 
 class ApprovalsStore:
@@ -95,3 +96,77 @@ class ApprovalsStore:
 
     def all(self) -> pd.DataFrame:
         return self._df.copy()
+
+    def sync_to_airtable(self, api_key: str, base_id: str, table_id: str, backup: bool = True) -> Tuple[bool, str, int, int]:
+        """Sync all approvals to Airtable and create backup.
+
+        Args:
+            api_key: Airtable API key
+            base_id: Airtable base ID
+            table_id: Airtable table ID
+            backup: Whether to create a backup CSV file (default True)
+
+        Returns:
+            Tuple of (success, message, created_count, updated_count)
+        """
+        try:
+            # Create backup first
+            if backup:
+                backup_path = BACKUP_PATH
+                self._df.to_csv(backup_path, index=False)
+
+            # Import here to avoid circular dependency
+            from src.airtable import AirtableConfig, upsert_dataframe
+            from datetime import datetime
+
+            # Convert timestamp to ISO 8601 format for Airtable
+            df_for_airtable = self._df.copy()
+            if 'Approved At' in df_for_airtable.columns:
+                df_for_airtable['Approved At'] = df_for_airtable['Approved At'].apply(
+                    lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if pd.notna(x) else None
+                )
+
+            # Sync to Airtable
+            cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+            created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account')
+
+            msg = f"Synced to Airtable: {created} created, {updated} updated"
+            if backup:
+                msg += f" | Backup saved to {backup_path}"
+
+            return True, msg, created, updated
+
+        except Exception as e:
+            return False, f"Airtable sync failed: {str(e)}", 0, 0
+
+    def upsert_and_sync(self, account: str, subtype: str, final_plan: str, extras: List[str],
+                       approved_by: str = "", airtable_config: Optional[Dict] = None) -> Tuple[bool, str]:
+        """Upsert approval to CSV and optionally sync to Airtable.
+
+        Args:
+            account: Account name
+            subtype: Sub type
+            final_plan: Final plan selection
+            extras: List of extras
+            approved_by: Name of approver
+            airtable_config: Optional dict with keys: api_key, base_id, table_id
+
+        Returns:
+            Tuple of (success, message)
+        """
+        # Save to CSV first
+        self.upsert(account, subtype, final_plan, extras, approved_by)
+
+        # Try to sync to Airtable if config provided
+        if airtable_config and all(k in airtable_config for k in ['api_key', 'base_id', 'table_id']):
+            success, msg, _, _ = self.sync_to_airtable(
+                airtable_config['api_key'],
+                airtable_config['base_id'],
+                airtable_config['table_id']
+            )
+            if success:
+                return True, f"Saved to CSV and {msg}"
+            else:
+                return True, f"Saved to CSV but Airtable sync failed: {msg}"
+
+        return True, "Saved to CSV (Airtable not configured)"

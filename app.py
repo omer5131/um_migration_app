@@ -46,6 +46,34 @@ def _preview_with_display_names(data):
         out[display] = ordered.get(k, []) if k != "plan" else ordered.get(k)
     return out
 
+
+def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str) -> tuple:
+    """Helper to sync a single approval to Airtable with backup.
+
+    Returns: (success: bool, message: str)
+    """
+    try:
+        api_key = AT_CFG.get('API_KEY')
+        base_id = AT_CFG.get('BASE_ID')
+        approvals_table = AT_CFG.get('APPROVALS_TABLE', 'Approvals')
+
+        if api_key and base_id and approvals_table:
+            airtable_config = {
+                'api_key': api_key,
+                'base_id': base_id,
+                'table_id': approvals_table
+            }
+            return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config)
+        else:
+            # No Airtable config, just save to CSV
+            store.upsert(account, subtype, plan, extras, approved_by)
+            return True, "Saved to CSV (Airtable not configured)"
+    except Exception as e:
+        # Fallback to CSV-only if sync fails
+        store.upsert(account, subtype, plan, extras, approved_by)
+        return True, f"Saved to CSV but sync failed: {str(e)}"
+
+
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
 def main():
@@ -402,27 +430,87 @@ def main():
 
     elif tab == "Approved":
         st.subheader("Approved Rows Store")
+
+        # Control buttons
+        col1, col2, col3 = st.columns([1, 1, 3])
+        with col1:
+            if st.button("🔄 Refresh from Airtable"):
+                st.session_state.pop('approvals_df_cached', None)
+                st.rerun()
+        with col2:
+            show_local = st.checkbox("Show local CSV only", value=False)
+
+        # Load approvals from Airtable or local CSV
         try:
+            if show_local:
+                # Show only local CSV
+                df_appr = store.all()
+                data_source = "Local CSV"
+            else:
+                # Try to load from Airtable if not already cached
+                if 'approvals_df_cached' not in st.session_state:
+                    api_key = AT_CFG.get('API_KEY')
+                    base_id = AT_CFG.get('BASE_ID')
+                    table_id = AT_CFG.get('APPROVALS_TABLE')
+
+                    if api_key and base_id and table_id:
+                        from src.airtable import AirtableConfig, fetch_records, records_to_dataframe
+
+                        with st.spinner("Loading from Airtable..."):
+                            cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+                            records = fetch_records(cfg)
+                            df_appr = records_to_dataframe(records)
+
+                            # Convert Airtable date format back to display format
+                            if 'Approved At' in df_appr.columns:
+                                try:
+                                    df_appr['Approved At'] = pd.to_datetime(df_appr['Approved At'])
+                                except Exception:
+                                    pass
+
+                            st.session_state['approvals_df_cached'] = df_appr
+                            data_source = "Airtable"
+                    else:
+                        # Fallback to local CSV if Airtable not configured
+                        df_appr = store.all()
+                        data_source = "Local CSV (Airtable not configured)"
+                else:
+                    df_appr = st.session_state['approvals_df_cached']
+                    data_source = "Airtable (cached)"
+
+        except Exception as e:
+            st.warning(f"Could not load from Airtable: {e}")
             df_appr = store.all()
-        except Exception:
-            df_appr = None
+            data_source = "Local CSV (Airtable failed)"
+
+        st.caption(f"Data source: **{data_source}**")
+
         if df_appr is None or df_appr.empty:
             st.info("No approvals saved yet.")
         else:
             # Add a search box to filter approvals
             q = st.text_input("Search approvals", placeholder="Filter by account, subtype, plan, etc.")
             view = df_appr.copy()
+
             # Show a human-readable timestamp
-            try:
-                view["Approved At (UTC)"] = pd.to_datetime(view["Approved At"], unit="s", utc=True)
-            except Exception:
-                pass
+            if 'Approved At' in view.columns:
+                try:
+                    # Handle both Unix timestamp and ISO format
+                    if pd.api.types.is_numeric_dtype(view['Approved At']):
+                        view["Approved At (UTC)"] = pd.to_datetime(view["Approved At"], unit="s", utc=True)
+                    else:
+                        view["Approved At (UTC)"] = pd.to_datetime(view["Approved At"], utc=True)
+                except Exception:
+                    pass
+
             if q:
                 s = q.strip().lower()
                 mask = view.astype(str).apply(lambda col: col.str.lower().str.contains(s, na=False))
                 view = view[mask.any(axis=1)]
+
             st.caption(f"{len(view)} approval(s)")
             st.dataframe(view, use_container_width=True)
+
             # Download CSV of current view
             csv_bytes = view.to_csv(index=False).encode("utf-8")
             st.download_button(
@@ -793,15 +881,16 @@ def main():
                     if not approved_by.strip():
                         st.error("Please enter your name in the sidebar.")
                     else:
-                        store.upsert(
-                            account=selected_acc,
-                            subtype=row['Sub Type'],
-                            final_plan=new_plan,
-                            extras=new_extras,
-                            approved_by=approved_by.strip(),
+                        # Save to CSV and sync to Airtable with backup
+                        success, msg = _sync_approval_to_airtable(
+                            store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip()
                         )
-                        st.success("Saved and locked. Re-run logic to see locked status in table.")
-                        st.caption(f"Approvals CSV updated at: {store.path}")
+                        if success:
+                            st.success(f"Saved and locked! {msg}")
+                            st.caption("Re-run logic to see locked status in table.")
+                        else:
+                            st.warning(msg)
+
                         # Auto-save updated Excel snapshot
                         try:
                             st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
@@ -811,24 +900,8 @@ def main():
                             gs = st.session_state.get('gsheets')
                             if gs and gs.get('enable_write'):
                                 write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                            # Also upsert this approval to Airtable Approvals table
-                            try:
-                                api_key = AT_CFG.get('API_KEY')
-                                base_id = AT_CFG.get('BASE_ID')
-                                approvals_table = AT_CFG.get('APPROVALS_TABLE', 'Approvals')
-                                if api_key and base_id and approvals_table:
-                                    fields = {
-                                        'Account': selected_acc,
-                                        'Sub Type': row['Sub Type'],
-                                        'Final Plan': new_plan,
-                                        'Extras': ", ".join(new_extras),
-                                        'Approved By': approved_by.strip(),
-                                    }
-                                    at_upsert_single(ATConfig(api_key=api_key, base_id=base_id, table_id_or_name=approvals_table), fields, key_field='Account')
-                            except Exception as _:
-                                pass
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            st.warning(f"Excel/Sheets export error: {e}")
 
                 st.markdown("---")
                 st.markdown("**Choose from Candidates**")
@@ -849,41 +922,25 @@ def main():
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
                         else:
-                            store.upsert(
-                                account=selected_acc,
-                                subtype=row['Sub Type'],
-                                final_plan=cand.get('plan', current_plan),
-                                extras=[str(x).strip() for x in cand.get('extras', [])],
-                                approved_by=approved_by.strip(),
+                            # Save to CSV and sync to Airtable with backup
+                            cand_extras = [str(x).strip() for x in cand.get('extras', [])]
+                            success, msg = _sync_approval_to_airtable(
+                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip()
                             )
-                            st.success("Selected candidate approved and locked.")
-                            st.caption(f"Approvals CSV updated at: {store.path}")
+                            if success:
+                                st.success(f"Selected candidate approved and locked! {msg}")
+                            else:
+                                st.warning(msg)
+
                             try:
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
                                 st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-                                # SQLite sync removed
                                 gs = st.session_state.get('gsheets')
                                 if gs and gs.get('enable_write'):
                                     write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                                # Also upsert this approval to Airtable Approvals table
-                                try:
-                                    api_key = AT_CFG.get('API_KEY')
-                                    base_id = AT_CFG.get('BASE_ID')
-                                    approvals_table = AT_CFG.get('APPROVALS_TABLE', 'Approvals')
-                                    if api_key and base_id and approvals_table:
-                                        fields = {
-                                            'Account': selected_acc,
-                                            'Sub Type': row['Sub Type'],
-                                            'Final Plan': parsed.get('plan', current_plan),
-                                            'Extras': ", ".join([str(x).strip() for x in parsed.get('extras', [])]),
-                                            'Approved By': approved_by.strip(),
-                                        }
-                                        at_upsert_single(ATConfig(api_key=api_key, base_id=base_id, table_id_or_name=approvals_table), fields, key_field='Account')
-                                except Exception as _:
-                                    pass
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                st.warning(f"Excel/Sheets export error: {e}")
 
                 st.markdown("---")
                 st.markdown("**Apply AI Decision**")
@@ -916,27 +973,25 @@ def main():
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
                         else:
-                            store.upsert(
-                                account=selected_acc,
-                                subtype=row['Sub Type'],
-                                final_plan=parsed.get('plan', current_plan),
-                                extras=[str(x).strip() for x in parsed.get('extras', [])],
-                                approved_by=approved_by.strip(),
+                            # Save to CSV and sync to Airtable with backup
+                            ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                            success, msg = _sync_approval_to_airtable(
+                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip()
                             )
-                            st.success("AI decision approved and locked.")
-                            st.caption(f"Approvals CSV updated at: {store.path}")
+                            if success:
+                                st.success(f"AI decision approved and locked! {msg}")
+                            else:
+                                st.warning(msg)
+
                             try:
                                 st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
                                 save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
                                 st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-                                sqlite_path = st.session_state.get("sqlite_path")
-                                if sqlite_path:
-                                    write_approvals_to_db(sqlite_path, store.all())
                                 gs = st.session_state.get('gsheets')
                                 if gs and gs.get('enable_write'):
                                     write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                st.warning(f"Excel/Sheets export error: {e}")
 
 if __name__ == "__main__":
     main()
