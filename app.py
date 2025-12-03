@@ -47,21 +47,41 @@ def _preview_with_display_names(data):
     return out
 
 
+def _get_airtable_config():
+    """Get Airtable configuration from session state (Data Sources) or config file.
+
+    Returns: dict with api_key, base_id, table_id, approvals_table or None if not configured
+    """
+    # First check if user manually configured in Data Sources
+    manual_config = st.session_state.get('airtable_manual', {})
+    api_key = manual_config.get('api_key') or AT_CFG.get('API_KEY')
+    base_id = manual_config.get('base_id') or AT_CFG.get('BASE_ID')
+    table_id = manual_config.get('table') or AT_CFG.get('TABLE')
+    approvals_table = manual_config.get('approvals_table') or AT_CFG.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3')
+
+    if api_key and base_id:
+        return {
+            'api_key': api_key,
+            'base_id': base_id,
+            'table_id': table_id,
+            'approvals_table': approvals_table
+        }
+    return None
+
+
 def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str) -> tuple:
     """Helper to sync a single approval to Airtable with backup.
 
     Returns: (success: bool, message: str)
     """
     try:
-        api_key = AT_CFG.get('API_KEY')
-        base_id = AT_CFG.get('BASE_ID')
-        approvals_table = AT_CFG.get('APPROVALS_TABLE', 'Approvals')
+        config = _get_airtable_config()
 
-        if api_key and base_id and approvals_table:
+        if config:
             airtable_config = {
-                'api_key': api_key,
-                'base_id': base_id,
-                'table_id': approvals_table
+                'api_key': config['api_key'],
+                'base_id': config['base_id'],
+                'table_id': config['approvals_table']
             }
             return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config)
         else:
@@ -475,14 +495,33 @@ def main():
     elif tab == "Approved":
         st.subheader("Approved Rows Store")
 
+        # Get Airtable config (from Data Sources or .env)
+        airtable_config = _get_airtable_config()
+
         # Control buttons
-        col1, col2, col3 = st.columns([1, 1, 3])
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         with col1:
             if st.button("🔄 Refresh from Airtable"):
                 st.session_state.pop('approvals_df_cached', None)
                 st.rerun()
         with col2:
             show_local = st.checkbox("Show local CSV only", value=False)
+        with col3:
+            if st.button("⬆️ Sync Local to Airtable"):
+                if airtable_config:
+                    with st.spinner("Syncing to Airtable..."):
+                        success, msg, created, updated = store.sync_to_airtable(
+                            airtable_config['api_key'],
+                            airtable_config['base_id'],
+                            airtable_config['approvals_table']
+                        )
+                        if success:
+                            st.success(f"{msg}")
+                            st.session_state.pop('approvals_df_cached', None)  # Clear cache
+                        else:
+                            st.error(msg)
+                else:
+                    st.error("Airtable not configured. Please configure in Data Sources tab.")
 
         # Load approvals from Airtable or local CSV
         try:
@@ -493,15 +532,15 @@ def main():
             else:
                 # Try to load from Airtable if not already cached
                 if 'approvals_df_cached' not in st.session_state:
-                    api_key = AT_CFG.get('API_KEY')
-                    base_id = AT_CFG.get('BASE_ID')
-                    table_id = AT_CFG.get('APPROVALS_TABLE')
-
-                    if api_key and base_id and table_id:
+                    if airtable_config:
                         from src.airtable import AirtableConfig, fetch_records, records_to_dataframe
 
                         with st.spinner("Loading from Airtable..."):
-                            cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+                            cfg = AirtableConfig(
+                                api_key=airtable_config['api_key'],
+                                base_id=airtable_config['base_id'],
+                                table_id_or_name=airtable_config['approvals_table']
+                            )
                             records = fetch_records(cfg)
                             df_appr = records_to_dataframe(records)
 
@@ -527,7 +566,15 @@ def main():
             df_appr = store.all()
             data_source = "Local CSV (Airtable failed)"
 
-        st.caption(f"Data source: **{data_source}**")
+        # Show data source and config status
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            st.caption(f"Data source: **{data_source}**")
+        with col_info2:
+            if airtable_config:
+                st.caption(f"✅ Airtable: `{airtable_config['base_id']}/{airtable_config['approvals_table']}`")
+            else:
+                st.caption("⚠️ Airtable not configured")
 
         if df_appr is None or df_appr.empty:
             st.info("No approvals saved yet.")
@@ -798,27 +845,6 @@ def main():
                     file_name="updated_migration.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-
-            # Sync all approvals to Airtable (bulk upsert)
-            if st.button("Sync approvals to Airtable"):
-                try:
-                    # Prefer any manual overrides entered in Data Sources → Airtable
-                    _manual = st.session_state.get('airtable_manual', {}) or {}
-                    api_key = (_manual.get('api_key') or AT_CFG.get('API_KEY'))
-                    base_id = (_manual.get('base_id') or AT_CFG.get('BASE_ID'))
-                    approvals_table = (_manual.get('approvals_table') or AT_CFG.get('APPROVALS_TABLE', 'Approvals'))
-                    if not (api_key and base_id and approvals_table):
-                        st.error("Missing Airtable config for approvals table.")
-                    else:
-                        df_to_push = approvals_df.copy()
-                        created, updated = at_upsert_df(
-                            ATConfig(api_key=api_key, base_id=base_id, table_id_or_name=approvals_table),
-                            df_to_push,
-                            key_field='Account'
-                        )
-                        st.success(f"Synced approvals to Airtable (created={created}, updated={updated}).")
-                except Exception as e:
-                    st.error(f"Airtable approvals sync error: {e}")
 
             # Optional: Sync approvals and updated mapping back to Google Sheets
             gs = st.session_state.get('gsheets')
