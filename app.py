@@ -82,28 +82,45 @@ def main():
     # Attempt auto-load from Airtable once per session
     if "auto_airtable_attempted" not in st.session_state:
         st.session_state["auto_airtable_attempted"] = True
-        try:
-            from src.data_loader import load_from_airtable
-            # Auto-submit Airtable using .env/Secrets, preferring cache (fetch only if missing)
-            data = load_from_airtable(refresh=False, ttl_seconds=None)
-            if data and isinstance(data, dict) and 'mapping' in data:
-                st.session_state["data"] = data
-                st.session_state["source"] = "airtable"
-                st.session_state["auto_airtable_ok"] = True
-            else:
-                st.session_state["auto_airtable_ok"] = False
-        except Exception:
-            st.session_state["auto_airtable_ok"] = False
+        st.session_state["auto_airtable_ok"] = False
+        st.session_state["auto_airtable_error"] = None
+
+        # Check if Airtable is configured in .env
+        if AT_CFG.get('API_KEY') and AT_CFG.get('BASE_ID') and AT_CFG.get('TABLE'):
+            try:
+                from src.data_loader import load_from_airtable
+                # Auto-load from Airtable using .env config, preferring cache
+                data = load_from_airtable(refresh=False, ttl_seconds=None)
+                if data and isinstance(data, dict) and 'mapping' in data:
+                    st.session_state["data"] = data
+                    st.session_state["source"] = "airtable"
+                    st.session_state["auto_airtable_ok"] = True
+                else:
+                    st.session_state["auto_airtable_error"] = "Airtable returned invalid data"
+            except Exception as e:
+                st.session_state["auto_airtable_error"] = str(e)
+        else:
+            st.session_state["auto_airtable_error"] = "Airtable credentials not configured in .env"
 
     # --- Sidebar Config & Tabs ---
     st.sidebar.header("Navigation")
     if st.session_state.get("auto_airtable_ok"):
+        # Airtable loaded successfully - show main tabs only
         nav_options = ["Recommendations & Agent", "Plan Mapping", "Approved"]
         nav_index = 0
+        st.sidebar.success("✅ Airtable connected")
+        st.sidebar.caption("Data loaded from Airtable")
+
+        # Show approvals sync status
+        if AT_CFG.get('APPROVALS_TABLE'):
+            st.sidebar.info(f"💾 Approvals auto-sync to: `{AT_CFG.get('APPROVALS_TABLE')}`")
     else:
+        # Airtable not loaded - show Data Sources tab
         nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
-        # When Data Sources is available, make it the default selection
         nav_index = 0
+        if st.session_state.get("auto_airtable_error"):
+            st.sidebar.warning(f"⚠️ Airtable: {st.session_state['auto_airtable_error'][:50]}")
+
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
     st.sidebar.header("Configuration")
@@ -235,7 +252,34 @@ def main():
             from src.data_loader import load_from_airtable
             from src.airtable import AirtableConfig as _ATCfg, load_cached_or_fetch as _at_load
 
-            st.write("Connect to Airtable. If secrets are unavailable, enter credentials manually.")
+            # Show current Airtable status
+            if AT.get('API_KEY') and AT.get('BASE_ID') and AT.get('TABLE'):
+                st.success("✅ Airtable is configured in .env")
+                col_stat1, col_stat2 = st.columns(2)
+                with col_stat1:
+                    st.info(f"**Base ID:** {AT.get('BASE_ID')}")
+                    st.info(f"**Mapping Table:** {AT.get('TABLE')}")
+                with col_stat2:
+                    st.info(f"**Approvals Table:** {AT.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3')}")
+                    st.info(f"**Cache:** {AT.get('CACHE_PATH', 'data/airtable_mapping.json')}")
+
+                if st.button("🔄 Force Refresh from Airtable Now"):
+                    try:
+                        with st.spinner("Refreshing from Airtable..."):
+                            data = load_from_airtable(refresh=True, ttl_seconds=0)
+                            if data and isinstance(data, dict) and 'mapping' in data:
+                                st.session_state["data"] = data
+                                st.session_state["source"] = "airtable"
+                                st.session_state["auto_airtable_ok"] = True
+                                st.success(f"✅ Refreshed! Loaded {len(data['mapping'])} accounts from Airtable")
+                            else:
+                                st.error("Failed to load data from Airtable")
+                    except Exception as e:
+                        st.error(f"Error refreshing: {e}")
+
+                st.markdown("---")
+
+            st.write("**Manual Configuration** (optional - only if you need to change settings):")
 
             # Pull current environment/secrets and prepare manual override state
             env_api_key = AT.get('API_KEY', '')
@@ -786,7 +830,6 @@ def main():
                         # Write approvals
                         write_dataframe(client, key, gs['approvals_ws'], approvals_df)
                         # Build updated mapping with Final Plan/Final Extras merged
-                        from src.exporter import build_updated_excel_bytes
                         # Recreate updated mapping similar to exporter
                         mapping_df = st.session_state.get('data', {}).get('mapping')
                         name_col = 'name' if ('name' in mapping_df.columns) else (

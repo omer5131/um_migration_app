@@ -45,15 +45,15 @@ def _getenv(name: str, default: str = "") -> str:
     return val.strip() if isinstance(val, str) else val
 
 
+# Airtable configuration - loaded from .env file
+# Copy .env.example to .env and fill in your Airtable credentials
 AIRTABLE = {
     "API_KEY": _getenv("AIRTABLE_API_KEY", ""),
-    "BASE_ID": _getenv("AIRTABLE_BASE_ID", ""),
-    "TABLE": _getenv("AIRTABLE_TABLE", ""),  # table name or ID
-    "VIEW": _getenv("AIRTABLE_VIEW", ""),
-    # Persistent cache path for Airtable pull (safe to keep in repo workspace)
+    "BASE_ID": _getenv("AIRTABLE_BASE_ID", "appt1H2lJxpR8NCbC"),
+    "TABLE": _getenv("AIRTABLE_TABLE", "tbl7xPdfPcPKzx3Tc"),
+    "VIEW": _getenv("AIRTABLE_VIEW", "viwnlPWDCWif3ovUJ"),
     "CACHE_PATH": _getenv("AIRTABLE_CACHE_PATH", os.path.join("data", "airtable_mapping.json")),
-    # Table (or ID) to store approvals records
-    "APPROVALS_TABLE": _getenv("AIRTABLE_APPROVALS_TABLE", "Approvals"),
+    "APPROVALS_TABLE": _getenv("AIRTABLE_APPROVALS_TABLE", "tblWWegam2OOTYpv3"),
 }
 
 # Optional: other secrets commonly used in app

@@ -288,8 +288,7 @@ def load_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
     """
     req_keys = ("API_KEY", "BASE_ID", "TABLE", "CACHE_PATH")
     if not all(AIRTABLE.get(k) for k in req_keys):
-        st.error("Missing Airtable config. Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE.")
-        return None
+        raise ValueError("Missing Airtable config. Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID, AIRTABLE_TABLE in .env")
     cfg = AirtableConfig(
         api_key=AIRTABLE['API_KEY'],
         base_id=AIRTABLE['BASE_ID'],
