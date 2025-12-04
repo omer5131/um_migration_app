@@ -58,34 +58,41 @@ def _load_nested_plan_from_file(path: str = "data/plan_json.json") -> dict | Non
 NESTED_PLAN_JSON: Dict[str, dict | list] = _load_nested_plan_from_file() or DEFAULT_NESTED_PLAN_JSON
 
 
-def get_flat_plan_json() -> Dict[str, List[str]]:
+def get_flat_plan_json(path: str = "data/plan_json.json") -> Dict[str, List[str]]:
     """Flatten the nested structure into {plan: [features,...]}.
 
-    - Ignores the EXTRAS family for the returned mapping.
+    - Ignores the EXTRAS and ADD_ONS families for the returned mapping.
     - Deduplicates and trims feature names.
     """
-    flat: Dict[str, set] = {}
-    for family, plans in NESTED_PLAN_JSON.items():
-        fam_upper = str(family).strip().upper()
-        if fam_upper in {"EXTRAS", "ADD_ONS"}:
-            continue
-        if isinstance(plans, dict):
-            for plan_name, feats in plans.items():
-                if not isinstance(feats, list):
+    try:
+        nested = _load_nested_plan_from_file(path)
+        if isinstance(nested, dict):
+            # Flatten on-the-fly from file, skipping EXTRAS and ADD_ONS
+            flat: Dict[str, set] = {}
+            for family, plans in nested.items():
+                fam_upper = str(family).strip().upper()
+                if fam_upper in {"EXTRAS", "ADD_ONS"}:
                     continue
-                plan = str(plan_name).strip()
-                for f in feats:
-                    fs = str(f).strip()
-                    if fs:
-                        flat.setdefault(plan, set()).add(fs)
-        elif isinstance(plans, list):
-            # Treat family name as plan when value is a list
-            plan = str(family).strip()
-            for f in plans:
-                fs = str(f).strip()
-                if fs:
-                    flat.setdefault(plan, set()).add(fs)
-    return {k: sorted(list(v)) for k, v in flat.items()}
+                if isinstance(plans, dict):
+                    for plan_name, feats in plans.items():
+                        if not isinstance(feats, list):
+                            continue
+                        plan = str(plan_name).strip()
+                        for f in feats:
+                            fs = str(f).strip()
+                            if fs:
+                                flat.setdefault(plan, set()).add(fs)
+                elif isinstance(plans, list):
+                    plan = str(family).strip()
+                    for f in plans:
+                        fs = str(f).strip()
+                        if fs:
+                            flat.setdefault(plan, set()).add(fs)
+            return {k: sorted(list(v)) for k, v in flat.items()}
+    except Exception:
+        pass
+    # Fallback: minimal defaults
+    return _flatten_if_nested(DEFAULT_NESTED_PLAN_JSON)
 
 
 def _flatten_if_nested(obj: dict) -> Dict[str, List[str]]:

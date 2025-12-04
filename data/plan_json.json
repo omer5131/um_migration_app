@@ -476,5 +476,44 @@
       "nasPremiumCsvColumns",
       "underwaterCables"
     ]
+  },
+
+  "ADD_ONS": {
+    "Companies Add-on": [
+      "companyProfile",
+      "exploreCompanies",
+      "enableExportCompanyPdfReport"
+    ],
+    "MAI Expert": [
+      "maiExpertVesselSummary",
+      "maiExpertVesselAdverseMedia"
+    ],
+    "UBO": [
+      "uboData"
+    ],
+    "Wet Cargo": [
+      "wetCargoData"
+    ],
+    "CDD Screening": [
+      "cddScreening"
+    ],
+    "Visual Link Analysis": [
+      "visualLinkAnalysis"
+    ],
+    "STS Classification": [
+      "stsClassification"
+    ],
+    "Export Center": [
+      "exportCenter"
+    ],
+    "News Feed": [
+      "newsFeed"
+    ],
+    "Underwater Cables": [
+      "underwaterCables"
+    ],
+    "NAS Premium CSV Columns": [
+      "nasPremiumCsvColumns"
+    ]
   }
 }

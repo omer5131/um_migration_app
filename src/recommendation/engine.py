@@ -83,6 +83,30 @@ class MigrationLogic:
             str(name): {canonicalize(feat, self.synonyms) for feat in (feats or [])}
             for name, feats in (raw_addons or {}).items()
         }
+        # Build a case-insensitive alias map to known canonical feature names
+        self._feature_alias: Dict[str, str] = {}
+        def _add_alias(src_set: Iterable[str]):
+            for feat in src_set:
+                key = str(feat).strip().lower()
+                if key and key not in self._feature_alias:
+                    self._feature_alias[key] = str(feat)
+        for feats in self.plan_definitions.values():
+            _add_alias(feats)
+        for feats in self.add_on_plans.values():
+            _add_alias(feats)
+        _add_alias(self.ga_set)
+        _add_alias(self.irrelevant_set)
+
+    def _canon_feature(self, name: str) -> str:
+        s = clean_feature_name(name)
+        if not s:
+            return s
+        # First, apply synonym mapping by case-insensitive key match
+        for k, v in (self.synonyms or {}).items():
+            if s.lower() == str(k).strip().lower():
+                return str(v).strip()
+        # Then, snap to a known canonical feature by case-insensitive match
+        return self._feature_alias.get(s.lower(), s)
 
     def _classify(self, features: Iterable[str]) -> dict:
         """Classify into GA / Irrelevant / Normal. Precedence: GA -> Irrelevant -> Normal."""
@@ -160,7 +184,7 @@ class MigrationLogic:
     def recommend(self, account_row: dict) -> dict:
         subtype = account_row.get("Sub Type", account_row.get("Subtype", "Unknown"))
         raw_user_features = parse_feature_list(account_row.get("featureNames", []))
-        user_features = {canonicalize(f, self.synonyms) for f in raw_user_features}
+        user_features = {self._canon_feature(f) for f in raw_user_features}
 
         candidates = self.get_relevant_plans(subtype)
         if not candidates:
@@ -363,8 +387,8 @@ class MigrationLogic:
 
         Respects GA and Irrelevant precedence; these do not contribute to extras/bloat.
         """
-        extras_canon = [canonicalize(e, self.synonyms) for e in (extras_list or [])]
-        user_canon = [canonicalize(u, self.synonyms) for u in (user_features or [])]
+        extras_canon = [self._canon_feature(e) for e in (extras_list or [])]
+        user_canon = [self._canon_feature(u) for u in (user_features or [])]
 
         # Classify and sanitize
         u = self._classify(user_canon)

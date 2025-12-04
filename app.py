@@ -4,147 +4,33 @@ import json
 import pandas as pd
 from src.data_loader import (
     load_all_data,
-    load_from_csv_paths,
     load_from_excel,
     suggest_excel_sheet_mapping,
     flatten_family_plan_json,
 )
 from src.logic import MigrationLogic
 from src.utils import parse_feature_list
-from src.config import EXTRA_COST_FEATURES, EXTRA_COST_BLOAT_WEIGHT, GA_FEATURES, IRRELEVANT_FEATURES
+from src.config import EXTRA_COST_BLOAT_WEIGHT
 from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
 from src.persistence import ApprovalsStore
 from src.sheets import make_client, load_from_sheets, extract_key_from_url, write_dataframe
 from src.config import AIRTABLE as AT_CFG
-from src.airtable import AirtableConfig as ATConfig, upsert_single as at_upsert_single, upsert_dataframe as at_upsert_df
+# Note: Airtable client functions are used indirectly through persistence
 from src.plan_definitions import get_flat_plan_json, get_active_plan_json
-from src.json_reorder import reorder_features_json
-
-# Display mapping for preview JSON keys
-_DISPLAY_KEY_MAP = {
-    "extras": "add-ons to compatability",
-    "bloat_features": "features on the house",
-    "gaFeaturesPresent": "GA present in account",
-    "gaFeaturesWillAppear": "GA will appear with plan",
-}
-
-
-def _preview_with_display_names(data):
-    """Order keys per spec, then rename display keys for preview."""
-    ordered = reorder_features_json(data)
-    order = [
-        "plan",
-        "extras",
-        "bloat_features",
-        "bloat_costly",
-        "gaFeatures",
-        "gaFeaturesPresent",
-        "gaFeaturesWillAppear",
-        "irrelevantFeatures",
-    ]
-    out = {}
-    for k in order:
-        display = _DISPLAY_KEY_MAP.get(k, k)
-        # Prefer value from ordered (known keys), otherwise from original data
-        if k == "plan":
-            out[display] = ordered.get(k) if ordered.get(k) is not None else data.get(k)
-        else:
-            out[display] = ordered.get(k, data.get(k, []))
-    return out
-
-
-def _classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[str]) -> dict:
-    """Module-level helper to classify GA/irrelevant and compute bloat consistently.
-
-    - Applies precedence GA over Irrelevant (removed from comparisons)
-    - Computes bloat as (plan + extras) - user
-    - Identifies costly bloat using EXTRA_COST_FEATURES
-    """
-    ga_all = set(GA_FEATURES)
-    ga_present = {f for f in user_feats if str(f).strip() in ga_all}
-    ga_from_bundle = {f for f in (plan_feats | extras_set) if str(f).strip() in ga_all}
-    ga_will_appear = ga_from_bundle - ga_present
-    ga = ga_present | ga_will_appear
-    irr = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(IRRELEVANT_FEATURES)}
-    # Precedence GA over Irrelevant
-    irr -= ga
-    # Sanitize for comparison
-    plan_norm = set(plan_feats) - ga - irr
-    user_norm = set(user_feats) - ga - irr
-    extras_norm = set(extras_set) - ga - irr
-    effective_bundle = plan_norm | extras_norm
-    bloat_features = sorted(effective_bundle - user_norm)
-    cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-    bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
-    return {
-        'ga': sorted(ga),
-        'ga_present': sorted(ga_present),
-        'ga_will_appear': sorted(ga_will_appear),
-        'irrelevant': sorted(irr),
-        'plan_norm': plan_norm,
-        'user_norm': user_norm,
-        'extras_norm': extras_norm,
-        'bloat_features': bloat_features,
-        'bloat_costly': bloat_costly,
-    }
-
-def _get_airtable_config():
-    """Get Airtable configuration from session state (Data Sources) or config file.
-
-    Returns: dict with api_key, base_id, table_id, approvals_table or None if not configured
-    """
-    # First check if user manually configured in Data Sources
-    manual_config = st.session_state.get('airtable_manual', {})
-    # Use manual config only if it's not empty, otherwise fallback to env config
-    api_key = manual_config.get('api_key', '').strip() or AT_CFG.get('API_KEY', '').strip()
-    base_id = manual_config.get('base_id', '').strip() or AT_CFG.get('BASE_ID', '').strip()
-    table_id = manual_config.get('table', '').strip() or AT_CFG.get('TABLE', '').strip()
-    approvals_table = manual_config.get('approvals_table', '').strip() or AT_CFG.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3').strip()
-
-    if api_key and base_id:
-        return {
-            'api_key': api_key,
-            'base_id': base_id,
-            'table_id': table_id,
-            'approvals_table': approvals_table
-        }
-    return None
-
-
-def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str, details: dict | None = None) -> tuple:
-    """Helper to sync a single approval to Airtable with backup.
-
-    Returns: (success: bool, message: str)
-    """
-    try:
-        config = _get_airtable_config()
-
-        if config:
-            # Validate config before using
-            api_key = config.get('api_key', '').strip()
-            base_id = config.get('base_id', '').strip()
-            table_id = config.get('approvals_table', '').strip()
-
-            if not api_key or not base_id or not table_id:
-                store.upsert(account, subtype, plan, extras, approved_by, details=details)
-                return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
-
-            airtable_config = {
-                'api_key': api_key,
-                'base_id': base_id,
-                'table_id': table_id
-            }
-            return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config, details=details)
-        else:
-            # No Airtable config, just save to CSV
-            store.upsert(account, subtype, plan, extras, approved_by, details=details)
-            return True, "Saved to CSV (Airtable not configured)"
-    except Exception as e:
-        # Fallback to CSV-only if sync fails
-        store.upsert(account, subtype, plan, extras, approved_by, details=details)
-        return True, f"Saved to CSV but sync failed: {str(e)}"
+from src.ui.helpers import (
+    preview_with_display_names as _preview_with_display_names,
+    enrich_bloat_with_ga as _enrich_bloat_with_ga,
+    classify_sets as _classify_sets,
+    make_details_payload as _make_details_payload,
+    autosave_exports as _autosave_exports,
+    get_airtable_config as _get_airtable_config,
+    sync_approval_to_airtable as _sync_approval_to_airtable,
+)
+from src.ui.data_sources import render as render_data_sources_tab
+from src.ui.approvals import render as render_approved_tab
+from src.ui.recommendations import render as render_recommendations_tab
 
 
 st.set_page_config(layout="wide", page_title="Migration AI Tool")
@@ -208,17 +94,7 @@ def main():
 
     st.sidebar.header("Configuration")
 
-    # Show Airtable sync status in sidebar
-    airtable_cfg = _get_airtable_config()
-    if airtable_cfg:
-        st.sidebar.success("✅ Airtable sync enabled")
-        if st.sidebar.button("🔄 Reset Airtable Config", help="Clear cached config and reload from .env"):
-            st.session_state.pop("airtable_manual", None)
-            st.session_state.pop("airtable_initialized", None)
-            st.rerun()
-    else:
-        st.sidebar.warning("⚠️ Airtable sync disabled")
-        st.sidebar.caption("Configure in Data Sources tab")
+    # Sidebar Airtable status moved into Data Sources renderer
 
     openai_key_input = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
     # Fallback to Streamlit secrets if input is empty
@@ -292,7 +168,7 @@ def main():
                 "- Approve via:\n"
                 "  - 'Approve Selected Option & Lock' (from candidates), or\n"
                 "  - 'Approve AI Decision & Lock', or\n"
-                "  - 'Save & Lock (Human Approved)' after selecting 'Final Plan' and extras."
+                "  - 'Save & Lock (Human Approved)' after selecting 'Final plan' and extras."
             )
         with st.expander("4) Persist and export", expanded=True):
             st.markdown(
@@ -304,15 +180,21 @@ def main():
 
         st.header("What gets saved on approval")
         st.markdown(
-            "- Core: Account, Sub Type, Final Plan, Extras, Approved By, Approved At.\n"
-            "- Analytics for follow-up: plan, add-ons to compatability, features on the house, bloat_costly, gaFeatures, GA present in account, GA will appear with plan, irrelevantFeatures."
+            "- Core: Account, Sub Type, Final plan, Extras, Approved By, Approved At.\n"
+            "- Analytics for follow-up: plan, Add-ons needed, Gained by plan (not currently in project), Bloat-costly."
+        )
+
+        st.subheader("Sections explained")
+        st.markdown(
+            "- Add-ons needed: Features the account uses today that are not included in the chosen plan; they must be added as paid add-ons.\n"
+            "- Gained by plan (not currently in project): Features bundled in the chosen plan or GA features that will become available with the chosen plan, but are not currently used (potential bloat to minimize).\n"
         )
 
         st.header("Tips & Notes")
         st.markdown(
             "- Only the Airtable API key is entered in the UI when needed; Base/Table IDs are preconfigured.\n"
             "- The candidates dropdown auto-selects the system recommendation but remains editable.\n"
-            "- 'Final Plan' is a dropdown of candidates to prevent typos; you can still adjust extras manually.\n"
+            "- 'Final plan' is a dropdown of candidates to prevent typos; you can still adjust extras manually.\n"
             "- Paid bloat is disallowed by design in AI selection; human overrides compute and store full analytics too."
         )
 
@@ -327,6 +209,8 @@ def main():
         st.stop()
 
     if tab == "Data Sources":
+        render_data_sources_tab()
+        st.stop()
         st.subheader("Connect Data Sources")
         # Make Airtable the first and default option
         source = st.radio("Select data source", ["Airtable", "Excel Workbook", "CSV Files (default)", "Google Sheets"], index=0)
@@ -610,6 +494,8 @@ def main():
                 st.dataframe(pd.DataFrame({"feature": feats}), use_container_width=True)
 
     elif tab == "Approved":
+        render_approved_tab(store)
+        st.stop()
         st.subheader("Approved Rows Store")
 
         # Get Airtable config (from Data Sources or .env)
@@ -728,7 +614,32 @@ def main():
                 mime="text/csv",
             )
 
+            # Delete/Unlock controls for local CSV
+            st.markdown("---")
+            st.markdown("**Undo / Remove Approvals (Local CSV)**")
+            try:
+                acc_options = sorted([str(x) for x in view['Account'].dropna().unique()]) if 'Account' in view.columns else []
+            except Exception:
+                acc_options = []
+            sel = st.multiselect("Select accounts to remove (unlock)", acc_options)
+            if st.button("Delete selected from local approvals"):
+                if not sel:
+                    st.info("No accounts selected.")
+                else:
+                    removed = store.delete_many(sel)
+                    if removed > 0:
+                        st.success(f"Removed {removed} record(s) from local approvals.")
+                        st.session_state.pop('approvals_df_cached', None)
+                        st.rerun()
+                    else:
+                        st.warning("No matching records removed.")
+
     elif tab == "Recommendations & Agent":
+        # Run logic and metrics
+        render_recommendations_tab(store, use_ai_bulk, openai_key, paid_bloat_penalty)
+        # Render detailed review/candidate/approval panel
+        from src.ui.review import render as render_review_panel
+        render_review_panel(store, openai_key, approved_by, paid_bloat_penalty)
         # Load data either from session or fallback
         data = st.session_state.get("data") or load_all_data()
         if not data:
@@ -835,9 +746,9 @@ def main():
                     plan_name = approved['Final Plan']
                     plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))
                     user_features = set(parse_feature_list(row.get('featureNames', [])))
-                    chosen_extras = set(approved['Extras'])
+                    chosen_extras = set(approved.get('Add-ons needed', []))
                     cls = _classify_sets(plan_features, user_features, chosen_extras)
-                    bloat_features = cls['bloat_features']
+                    bloat_features = sorted(list(set(cls['bloat_features']) | set(cls.get('ga_will_appear', []))))
                     bloat_costly = cls['bloat_costly']
                     rec = {
                         'recommended_plan': plan_name,
@@ -847,9 +758,6 @@ def main():
                         'bloat_features': bloat_features,
                         'bloat_costly': bloat_costly,
                         'bloat_costly_count': len(bloat_costly),
-                        'gaFeatures': cls['ga'],
-                        'gaFeaturesPresent': cls['ga_present'],
-                        'gaFeaturesWillAppear': cls['ga_will_appear'],
                         'irrelevantFeatures': cls['irrelevant'],
                         'status': 'Locked (Human Approved)',
                     }
@@ -881,25 +789,20 @@ def main():
                     bloat_features = cls['bloat_features']
                     bloat_costly = cls['bloat_costly']
                     rec['bloat_score'] = len(bloat_features)
-                    rec['bloat_features'] = bloat_features
+                    # Combine plan-bundled and GA features not currently used
+                    rec['bloat_features'] = _enrich_bloat_with_ga(bloat_features, cls.get('ga_will_appear', []))
                     rec['bloat_costly'] = bloat_costly
                     rec['bloat_costly_count'] = len(bloat_costly)
-                    rec['gaFeatures'] = cls['ga']
-                    rec['gaFeaturesPresent'] = cls['ga_present']
-                    rec['gaFeaturesWillAppear'] = cls['ga_will_appear']
                     rec['irrelevantFeatures'] = cls['irrelevant']
 
                 res_row = {
                     "Account": account_name,
                     "Sub Type": row.get('Sub Type', row.get('Subtype', 'Unknown')),
                     "Recommended Plan": rec['recommended_plan'],
-                    "Extras (Add-ons)": ", ".join(rec['extras']),
+                    "Add-ons needed": ", ".join(rec['extras']),
                     "Extras Count": rec.get('extras_count', 0),
-                    "GA Features": ", ".join(rec.get('gaFeatures', [])),
-                    "GA Present": ", ".join(rec.get('gaFeaturesPresent', [])),
-                    "GA Will Appear": ", ".join(rec.get('gaFeaturesWillAppear', [])),
                     "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
-                    "Bloat Features": ", ".join(rec.get('bloat_features', [])),
+                    "Gained by plan (not currently in project)": ", ".join(rec.get('bloat_features', [])),
                     "Costly Bloat Count": rec.get('bloat_costly_count', 0),
                     "Bloat Score": rec.get('bloat_score', 0),
                     "Status": rec['status'],
@@ -956,15 +859,17 @@ def main():
                         key = gs['spreadsheet_key']
                         # Write approvals
                         write_dataframe(client, key, gs['approvals_ws'], approvals_df)
-                        # Build updated mapping with Final Plan/Final Extras merged
+                        # Build updated mapping with Final Plan/Final Add-ons needed merged
                         # Recreate updated mapping similar to exporter
                         mapping_df = st.session_state.get('data', {}).get('mapping')
                         name_col = 'name' if ('name' in mapping_df.columns) else (
                             'SalesForce_Account_NAME' if 'SalesForce_Account_NAME' in mapping_df.columns else None)
                         out_df = mapping_df.copy()
                         if name_col:
-                            appr = approvals_df[["Account", "Final Plan", "Extras", "Approved By", "Approved At"]].rename(
-                                columns={"Account": name_col, "Final Plan": "Final Plan", "Extras": "Final Extras"}
+                            field_name = "Add-ons needed" if "Add-ons needed" in approvals_df.columns else ("Extras" if "Extras" in approvals_df.columns else None)
+                            cols = ["Account", "Final Plan"] + ([field_name] if field_name else [])
+                            appr = approvals_df[cols].rename(
+                                columns={"Account": name_col, "Final Plan": "Final Plan", (field_name or "Extras"): "Final Add-ons needed"}
                             )
                             out_df = out_df.merge(appr, on=name_col, how="left")
                         write_dataframe(client, key, gs['updated_map_ws'], out_df)
@@ -988,12 +893,29 @@ def main():
 
             # Current values (from rec or locked)
             current_plan = row['Recommended Plan']
-            current_extras = [x.strip() for x in str(row['Extras (Add-ons)']).split(',') if x.strip()]
+            current_extras = [x.strip() for x in str(row.get('Add-ons needed', '')).split(',') if x.strip()]
 
             approved = store.get(selected_acc)
             locked = approved is not None
             lock_status = "Locked (Human Approved)" if locked else "Not Locked"
             st.caption(f"Status: {lock_status}")
+            if locked:
+                if st.button("Unlock (Remove approval)"):
+                    try:
+                        ok = store.delete(selected_acc)
+                        if ok:
+                            st.success("Approval removed. This account is now unlocked.")
+                            # Refresh exports and views
+                            try:
+                                st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
+                                save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
+                            except Exception:
+                                pass
+                            st.rerun()
+                        else:
+                            st.warning("No saved approval to remove.")
+                    except Exception as e:
+                        st.error(f"Unlock failed: {e}")
 
             # Agent review and AI decision maker
             agent_col, human_col = st.columns(2)
@@ -1087,10 +1009,10 @@ def main():
                                 break
 
                 new_plan = (
-                    st.selectbox("Final Plan", plan_options, index=default_idx if plan_options else 0)
-                    if plan_options else st.text_input("Final Plan", value=current_plan, disabled=False)
+                    st.selectbox("Final plan", plan_options, index=default_idx if plan_options else 0)
+                    if plan_options else st.text_input("Final plan", value=current_plan, disabled=False)
                 )
-                new_extras_str = st.text_area("Final Extras (comma-separated)", value=", ".join(current_extras), height=80)
+                new_extras_str = st.text_area("Final Add-ons needed (comma-separated)", value=", ".join(current_extras), height=80)
                 new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
 
                 if st.button("Save & Lock (Human Approved)"):
@@ -1106,16 +1028,7 @@ def main():
                         except Exception:
                             cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
 
-                        details_payload = {
-                            'plan': new_plan,
-                            'add-ons to compatability': [str(x).strip() for x in new_extras],
-                            'features on the house': list(cls.get('bloat_features', [])),
-                            'bloat_costly': list(cls.get('bloat_costly', [])),
-                            'gaFeatures': list(cls.get('ga', [])),
-                            'GA present in account': list(cls.get('ga_present', [])),
-                            'GA will appear with plan': list(cls.get('ga_will_appear', [])),
-                            'irrelevantFeatures': list(cls.get('irrelevant', [])),
-                        }
+                        details_payload = _make_details_payload(new_plan, cls, new_extras)
 
                         # Save to CSV and sync to Airtable with backup
                         success, msg = _sync_approval_to_airtable(
@@ -1127,17 +1040,8 @@ def main():
                         else:
                             st.warning(msg)
 
-                        # Auto-save updated Excel snapshot
-                        try:
-                            st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
-                            save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
-                            st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-                            # Optionally sync to Google Sheets
-                            gs = st.session_state.get('gsheets')
-                            if gs and gs.get('enable_write'):
-                                write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                        except Exception as e:
-                            st.warning(f"Excel/Sheets export error: {e}")
+                        # Auto-save updated Excel snapshot and optional Sheets write
+                        _autosave_exports(store)
 
                 st.markdown("---")
                 st.markdown("**Choose from Candidates**")
@@ -1206,16 +1110,14 @@ def main():
                 if selected_idx is not None:
                     cand = candidates[selected_idx]
                     st.caption("Preview of selected candidate")
-                    # Enrich preview with GA split for better visibility
+                    # Enrich preview by combining GA with plan-bundled features
                     try:
                         plan_feats = set(logic_engine.plan_definitions.get(cand.get('plan'), set()))
                         user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
                         extras_set = set(cand.get('extras', []))
                         cls = _classify_sets(plan_feats, user_feats, extras_set)
                         enriched = dict(cand)
-                        enriched['gaFeatures'] = cls['ga']
-                        enriched['gaFeaturesPresent'] = cls['ga_present']
-                        enriched['gaFeaturesWillAppear'] = cls['ga_will_appear']
+                        enriched['bloat_features'] = _enrich_bloat_with_ga(cand.get('bloat_features', []), cls.get('ga_will_appear', []))
                         st.json(_preview_with_display_names(enriched))
                     except Exception:
                         st.json(_preview_with_display_names(cand))
@@ -1226,16 +1128,9 @@ def main():
                             # Save to CSV and sync to Airtable with backup
                             cand_extras = [str(x).strip() for x in cand.get('extras', [])]
                             # Build detailed analytics payload for Airtable/CSV
-                            details_payload = {
-                                'plan': cand.get('plan', current_plan),
-                                'add-ons to compatability': cand_extras,
-                                'features on the house': list(cls.get('bloat_features', [])),
-                                'bloat_costly': list(cls.get('bloat_costly', [])),
-                                'gaFeatures': list(cls.get('ga', [])),
-                                'GA present in account': list(cls.get('ga_present', [])),
-                                'GA will appear with plan': list(cls.get('ga_will_appear', [])),
-                                'irrelevantFeatures': list(cls.get('irrelevant', [])),
-                            }
+                            details_payload = _make_details_payload(
+                                cand.get('plan', current_plan), cls, cand_extras
+                            )
                             success, msg = _sync_approval_to_airtable(
                                 store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
                             )
@@ -1244,15 +1139,7 @@ def main():
                             else:
                                 st.warning(msg)
 
-                            try:
-                                st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
-                                save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
-                                st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-                                gs = st.session_state.get('gsheets')
-                                if gs and gs.get('enable_write'):
-                                    write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                            except Exception as e:
-                                st.warning(f"Excel/Sheets export error: {e}")
+                            _autosave_exports(store)
 
                 st.markdown("---")
                 st.markdown("**Apply AI Decision**")
@@ -1274,11 +1161,8 @@ def main():
                             {
                                 'plan': plan_name,
                                 'extras': sorted(list(cls['extras_norm'])),
-                                'bloat_features': bloat_feats,
+                                'bloat_features': _enrich_bloat_with_ga(bloat_feats, cls.get('ga_will_appear', [])),
                                 'bloat_costly': parsed.get('bloat_costly', []),
-                                'gaFeatures': ga_feats,
-                                'gaFeaturesPresent': cls['ga_present'],
-                                'gaFeaturesWillAppear': cls['ga_will_appear'],
                                 'irrelevantFeatures': irr_feats,
                             }
                         )
@@ -1289,16 +1173,9 @@ def main():
                         else:
                             # Save to CSV and sync to Airtable with backup
                             ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
-                            details_payload = {
-                                'plan': parsed.get('plan', current_plan),
-                                'add-ons to compatability': ai_extras,
-                                'features on the house': list(cls.get('bloat_features', [])),
-                                'bloat_costly': list(cls.get('bloat_costly', [])),
-                                'gaFeatures': list(cls.get('ga', [])),
-                                'GA present in account': list(cls.get('ga_present', [])),
-                                'GA will appear with plan': list(cls.get('ga_will_appear', [])),
-                                'irrelevantFeatures': list(cls.get('irrelevant', [])),
-                            }
+                            details_payload = _make_details_payload(
+                                parsed.get('plan', current_plan), cls, ai_extras
+                            )
                             success, msg = _sync_approval_to_airtable(
                                 store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
                             )
@@ -1307,15 +1184,7 @@ def main():
                             else:
                                 st.warning(msg)
 
-                            try:
-                                st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
-                                save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
-                                st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-                                gs = st.session_state.get('gsheets')
-                                if gs and gs.get('enable_write'):
-                                    write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
-                            except Exception as e:
-                                st.warning(f"Excel/Sheets export error: {e}")
+                            _autosave_exports(store)
 
 if __name__ == "__main__":
     main()

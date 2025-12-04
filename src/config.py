@@ -63,7 +63,7 @@ GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 # Global Availability (GA) features — always available and not counted as extras/bloat
 GA_FEATURES = [
     "activitySequences",
-    "softAoi"
+    "softAoi",
     "nasAgGridTable",
     "mapMarkers",
     "weatherLayer",

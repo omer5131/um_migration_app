@@ -5,6 +5,7 @@ from typing import Dict, Tuple, List
 import os
 import pandas as pd
 from src.recommendation.engine import MigrationLogic
+from src.plan_definitions import get_active_plan_json
 from src.utils import parse_feature_list
 
 
@@ -18,7 +19,7 @@ def _flatten_plan_json(plan_json: Dict[str, list]) -> pd.DataFrame:
 
 def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
     mapping_df: pd.DataFrame = data.get("mapping", pd.DataFrame()).copy()
-    plan_json: Dict = data.get("plan_json", {})
+    plan_json: Dict = data.get("plan_json", {}) or get_active_plan_json()
 
     # Merge approvals into mapping
     if not approvals_df.empty and not mapping_df.empty:
@@ -27,23 +28,26 @@ def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
         )
         out_df = mapping_df.copy()
         if name_col:
-            appr = approvals_df[["Account", "Final Plan", "Extras", "Approved By", "Approved At"]].rename(
+            # Merge approved plan and add-ons needed
+            field_name = "Add-ons needed" if "Add-ons needed" in approvals_df.columns else ("Extras" if "Extras" in approvals_df.columns else None)
+            cols = ["Account", "Final Plan", "Approved By", "Approved At"] + ([field_name] if field_name else [])
+            appr = approvals_df[cols].rename(
                 columns={
                     "Account": name_col,
                     "Final Plan": "Final Plan",
-                    "Extras": "Final Extras",
+                    (field_name or "Extras"): "Final Add-ons needed",
                 }
             )
             # Prefer left merge to keep all mapping rows
             out_df = out_df.merge(appr, on=name_col, how="left")
         else:
             out_df["Final Plan"] = None
-            out_df["Final Extras"] = None
+            out_df["Final Add-ons needed"] = None
     else:
         out_df = mapping_df.copy()
         if not out_df.empty:
             out_df["Final Plan"] = None
-            out_df["Final Extras"] = None
+            out_df["Final Add-ons needed"] = None
 
     plan_df = _flatten_plan_json(plan_json)
 
@@ -72,12 +76,20 @@ def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
                 # Ensure featureNames present (engine will parse if str/JSON list)
                 account_row.setdefault("featureNames", account_row.get("featureNames", []))
                 rec = logic.recommend(account_row)
+                # Combine add-on plan names with feature extras for a single actionable column
+                try:
+                    plan_names = [str(x).strip() for x in rec.get("addOnPlans", []) if str(x).strip()]
+                    feature_extras = [str(x).strip() for x in rec.get("extras", []) if str(x).strip()]
+                    combined_addons = [x for x in (plan_names + feature_extras) if x]
+                except Exception:
+                    combined_addons = [str(x) for x in rec.get("extras", [])]
+
                 rows.append({
                     "Account": row.get(name_col),
                     "Sub Type": row.get(subtype_col) if subtype_col else None,
                     "Recommended Plan": rec.get("recommended_plan"),
-                    "Add-on Plans": ", ".join(rec.get("addOnPlans", [])),
-                    "Extras": ", ".join([str(x) for x in rec.get("extras", [])]),
+                    "Add-ons needed": ", ".join(combined_addons),
+                    "Applied Add-on Plans": ", ".join([str(x) for x in rec.get("addOnPlans", [])]),
                     "Extras Count": rec.get("extras_count"),
                     "Bloat Count": rec.get("bloat_score"),
                     "Paid Bloat Count": rec.get("bloat_costly_count"),

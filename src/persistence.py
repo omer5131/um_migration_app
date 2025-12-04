@@ -17,10 +17,9 @@ class ApprovalsStore:
     """Simple CSV-backed store for human-approved rows.
 
     Schema (CSV):
-    - Account, Sub Type, Final Plan, Extras (comma-separated), Approved By, Approved At (epoch seconds)
+    - Account, Sub Type, Final Plan, Add-ons needed (comma-separated), Approved By, Approved At (epoch seconds)
     - Plus optional analytics fields saved as columns when provided:
-      plan, add-ons to compatability, features on the house, bloat_costly,
-      gaFeatures, GA present in account, GA will appear with plan, irrelevantFeatures
+      plan, Add-ons needed, Gained by plan (not currently in project), Bloat-costly
     """
 
     def __init__(self, path: str = DEFAULT_PATH):
@@ -31,14 +30,18 @@ class ApprovalsStore:
     def _load(self) -> pd.DataFrame:
         if os.path.exists(self.path):
             try:
-                return pd.read_csv(self.path)
+                df = pd.read_csv(self.path)
+                # Backward compatibility: rename old 'Extras' to 'Add-ons needed'
+                if 'Add-ons needed' not in df.columns and 'Extras' in df.columns:
+                    df = df.rename(columns={'Extras': 'Add-ons needed'})
+                return df
             except Exception:
                 return pd.DataFrame(
                     columns=[
                         "Account",
                         "Sub Type",
                         "Final Plan",
-                        "Extras",
+                        "Add-ons needed",
                         "Approved By",
                         "Approved At",
                     ]
@@ -48,7 +51,7 @@ class ApprovalsStore:
                 "Account",
                 "Sub Type",
                 "Final Plan",
-                "Extras",
+                "Add-ons needed",
                 "Approved By",
                 "Approved At",
             ]
@@ -67,9 +70,9 @@ class ApprovalsStore:
         if rows.empty:
             return None
         row = rows.iloc[0].to_dict()
-        # Parse extras as list
-        extras = [x.strip() for x in str(row.get("Extras", "")).split(",") if x.strip()]
-        row["Extras"] = extras
+        # Parse add-ons needed as list
+        extras = [x.strip() for x in str(row.get("Add-ons needed", "")).split(",") if x.strip()]
+        row["Add-ons needed"] = extras
         return row
 
     def upsert(self, account: str, subtype: str, final_plan: str, extras: List[str], approved_by: str = "",
@@ -86,7 +89,7 @@ class ApprovalsStore:
             "Account": account,
             "Sub Type": subtype,
             "Final Plan": final_plan,
-            "Extras": extras_str,
+            "Add-ons needed": extras_str,
             "Approved By": approved_by,
             "Approved At": ts,
         }
@@ -111,6 +114,29 @@ class ApprovalsStore:
 
     def all(self) -> pd.DataFrame:
         return self._df.copy()
+
+    def delete(self, account: str) -> bool:
+        """Delete an approval row by Account. Returns True if a row was removed."""
+        if self._df.empty:
+            return False
+        before = len(self._df)
+        self._df = self._df[self._df["Account"] != account].reset_index(drop=True)
+        if len(self._df) != before:
+            self._persist()
+            return True
+        return False
+
+    def delete_many(self, accounts: List[str]) -> int:
+        """Delete multiple approval rows by Account. Returns number of rows removed."""
+        if not accounts:
+            return 0
+        to_remove = set(str(a) for a in accounts)
+        before = len(self._df)
+        self._df = self._df[~self._df["Account"].astype(str).isin(to_remove)].reset_index(drop=True)
+        removed = before - len(self._df)
+        if removed > 0:
+            self._persist()
+        return removed
 
     def sync_to_airtable(self, api_key: str, base_id: str, table_id: str, backup: bool = True) -> Tuple[bool, str, int, int]:
         """Sync all approvals to Airtable and create backup.
@@ -145,12 +171,14 @@ class ApprovalsStore:
 
             # Map column names to match Airtable field names
             column_mapping = {
-                'add-ons to compatability': 'add-ons to compatibility',  # Fix typo
-                # Fixed field name typo: 'on the house' (was 'on the houes')
+                # Backward compat: map old labels
+                'add-ons to compatability': 'add-ons to compatibility',
                 'features on the house': 'on the house',
-                'gaFeatures': 'GA features',  # Map to Airtable field name
-                'GA present in account': 'GA features copy',  # Map to Airtable field name
-                'GA will appear with plan': 'GA features copy 2',  # Map to Airtable field name
+                # New user-friendly labels
+                'Add-ons needed': 'add-ons to compatibility',
+                'Included but not used': 'on the house',  # legacy
+                'Gained by plan (not in project)': 'on the house',  # legacy
+                'Gained by plan (not currently in project)': 'on the house',
             }
             df_for_airtable = df_for_airtable.rename(columns=column_mapping)
 
@@ -166,12 +194,8 @@ class ApprovalsStore:
             # Convert list columns to comma-separated strings for Airtable
             # Note: Using text format instead of multi-select to avoid choice validation issues
             list_like_columns = [
-                'add-ons to compatibility',  # Fixed typo: compatibility not compatability
-                'on the house',  # Maps from 'features on the house'
+                # Keep 'add-ons to compatibility' and 'on the house' as list for Airtable multi-select; do not flatten here
                 'bloat_costly',
-                'GA features',  # Maps to gaFeatures
-                'GA features copy',  # Maps to GA present in account
-                'GA features copy 2',  # Maps to GA will appear with plan
                 'irrelevantFeatures',
             ]
             for col in list_like_columns:
@@ -195,13 +219,74 @@ class ApprovalsStore:
                         return str(x) if x else None
                     df_for_airtable[col] = df_for_airtable[col].apply(_list_to_text)
 
+            # Multi-select for add-ons: ensure a list for 'add-ons to compatibility'
+            if 'add-ons to compatibility' in df_for_airtable.columns:
+                def _to_list(x):
+                    if x is None:
+                        return []
+                    if isinstance(x, list):
+                        return [str(i).strip() for i in x if str(i).strip()]
+                    # Try JSON parse for lists stored as text
+                    if isinstance(x, str):
+                        try:
+                            val = json.loads(x)
+                            if isinstance(val, list):
+                                return [str(i).strip() for i in val if str(i).strip()]
+                        except Exception:
+                            pass
+                        # Comma separated fallback
+                        parts = [p.strip() for p in x.split(',') if p.strip()]
+                        return parts
+                    return [str(x).strip()] if str(x).strip() else []
+                df_for_airtable['add-ons to compatibility'] = df_for_airtable['add-ons to compatibility'].apply(_to_list)
+
+            # Multi-select for gained-by-plan: ensure a list for 'on the house'
+            if 'on the house' in df_for_airtable.columns:
+                def _to_list_oth(x):
+                    if x is None:
+                        return []
+                    if isinstance(x, list):
+                        return [str(i).strip() for i in x if str(i).strip()]
+                    if isinstance(x, str):
+                        try:
+                            val = json.loads(x)
+                            if isinstance(val, list):
+                                return [str(i).strip() for i in val if str(i).strip()]
+                        except Exception:
+                            pass
+                        parts = [p.strip() for p in x.split(',') if p.strip()]
+                        return parts
+                    return [str(x).strip()] if str(x).strip() else []
+                df_for_airtable['on the house'] = df_for_airtable['on the house'].apply(_to_list_oth)
+
             # Only keep fields that exist in the Approvals table schema
             # This prevents 422 errors for unknown fields (e.g., analytics-only columns)
-            allowed_fields = {
+            basic_fields = {
                 'Account', 'Sub Type', 'Final Plan', 'Extras', 'Approved By', 'Approved At'
             }
-            existing_cols = [c for c in df_for_airtable.columns if c in allowed_fields]
-            df_for_airtable = df_for_airtable[existing_cols]
+            # Optional analytics fields we can include if the Airtable table already has them
+            # Use Airtable field names after column_mapping rename
+            optional_fields = {
+                'add-ons to compatibility',  # from 'Add-ons needed'
+                'on the house',              # from 'Gained by plan (not currently in project)'
+            }
+
+            # Detect existing field names in Airtable by sampling records
+            existing_airtable_fields = set()
+            try:
+                from src.airtable import fetch_records
+                cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+                sample = fetch_records(cfg)
+                for r in sample[:50]:
+                    fields = r.get('fields') or {}
+                    existing_airtable_fields.update([str(k) for k in fields.keys()])
+            except Exception:
+                pass
+
+            allowed_fields = set(basic_fields)
+            # Include only optional fields that exist both in DF and in Airtable schema
+            allowed_fields.update(optional_fields & set(df_for_airtable.columns) & existing_airtable_fields)
+            df_for_airtable = df_for_airtable[[c for c in df_for_airtable.columns if c in allowed_fields]]
 
             # Sync to Airtable
             cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
