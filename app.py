@@ -77,7 +77,7 @@ def _get_airtable_config():
     return None
 
 
-def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str) -> tuple:
+def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str, details: dict | None = None) -> tuple:
     """Helper to sync a single approval to Airtable with backup.
 
     Returns: (success: bool, message: str)
@@ -91,14 +91,14 @@ def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, ext
                 'base_id': config['base_id'],
                 'table_id': config['approvals_table']
             }
-            return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config)
+            return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config, details=details)
         else:
             # No Airtable config, just save to CSV
-            store.upsert(account, subtype, plan, extras, approved_by)
+            store.upsert(account, subtype, plan, extras, approved_by, details=details)
             return True, "Saved to CSV (Airtable not configured)"
     except Exception as e:
         # Fallback to CSV-only if sync fails
-        store.upsert(account, subtype, plan, extras, approved_by)
+        store.upsert(account, subtype, plan, extras, approved_by, details=details)
         return True, f"Saved to CSV but sync failed: {str(e)}"
 
 
@@ -139,9 +139,7 @@ def main():
         st.sidebar.success("✅ Airtable connected")
         st.sidebar.caption("Data loaded from Airtable")
 
-        # Show approvals sync status
-        if AT_CFG.get('APPROVALS_TABLE'):
-            st.sidebar.info(f"💾 Approvals auto-sync to: `{AT_CFG.get('APPROVALS_TABLE')}`")
+        # Hide Airtable table details from UI; show only generic status
     else:
         # Airtable not loaded - show Data Sources tab
         nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
@@ -280,16 +278,9 @@ def main():
             from src.data_loader import load_from_airtable
             from src.airtable import AirtableConfig as _ATCfg, load_cached_or_fetch as _at_load
 
-            # Show current Airtable status
+            # Show current Airtable status (without exposing IDs/tables)
             if AT.get('API_KEY') and AT.get('BASE_ID') and AT.get('TABLE'):
-                st.success("✅ Airtable is configured in .env")
-                col_stat1, col_stat2 = st.columns(2)
-                with col_stat1:
-                    st.info(f"**Base ID:** {AT.get('BASE_ID')}")
-                    st.info(f"**Mapping Table:** {AT.get('TABLE')}")
-                with col_stat2:
-                    st.info(f"**Approvals Table:** {AT.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3')}")
-                    st.info(f"**Cache:** {AT.get('CACHE_PATH', 'data/airtable_mapping.json')}")
+                st.success("✅ Airtable is configured")
 
                 if st.button("🔄 Force Refresh from Airtable Now"):
                     try:
@@ -307,9 +298,9 @@ def main():
 
                 st.markdown("---")
 
-            st.write("**Manual Configuration** (optional - only if you need to change settings):")
+            st.write("**Manual Configuration** (optional): API Key only")
 
-            # Pull current environment/secrets and prepare manual override state
+            # Pull current environment/secrets and prepare manual state (API key only)
             env_api_key = AT.get('API_KEY', '')
             env_base_id = AT.get('BASE_ID', '')
             env_table = AT.get('TABLE', '')
@@ -319,34 +310,16 @@ def main():
 
             st.session_state.setdefault('airtable_manual', {
                 'api_key': env_api_key,
-                'base_id': env_base_id,
-                'table': env_table,
-                'view': env_view,
-                'cache_path': env_cache,
-                'approvals_table': env_approvals,
             })
 
-            colA, colB = st.columns(2)
-            with colA:
-                api_key = st.text_input("AIRTABLE_API_KEY", value=(st.session_state['airtable_manual']['api_key'] or env_api_key), type="password", disabled=False)
-                base_id = st.text_input("AIRTABLE_BASE_ID", value=(st.session_state['airtable_manual']['base_id'] or env_base_id), disabled=False)
-                table_name = st.text_input("AIRTABLE_TABLE (name or id)", value=(st.session_state['airtable_manual']['table'] or env_table), disabled=False)
-            with colB:
-                view = st.text_input("AIRTABLE_VIEW (optional)", value=(st.session_state['airtable_manual']['view'] or env_view), disabled=False)
-                cache_path = st.text_input("AIRTABLE_CACHE_PATH", value=(st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'), disabled=False)
-                approvals_table = st.text_input("AIRTABLE_APPROVALS_TABLE", value=(st.session_state['airtable_manual']['approvals_table'] or env_approvals or 'Approvals'), disabled=False)
+            api_key = st.text_input("AIRTABLE_API_KEY", value=(st.session_state['airtable_manual']['api_key'] or env_api_key), type="password", disabled=False)
 
-            # Always update session with current form values
+            # Always update session with current form values (API key only)
             st.session_state['airtable_manual'] = {
                 'api_key': (api_key or '').strip(),
-                'base_id': (base_id or '').strip(),
-                'table': (table_name or '').strip(),
-                'view': (view or '').strip(),
-                'cache_path': (cache_path or 'data/airtable_mapping.json').strip(),
-                'approvals_table': (approvals_table or 'Approvals').strip(),
             }
 
-            st.caption("Review the values and click Save to write them to .env for next runs (do not commit secrets).")
+            st.caption("Provide an API key if automatic sync fails. Base and tables are preconfigured.")
 
             def _write_env(env_path: str, updates: dict[str, str]):
                 try:
@@ -382,39 +355,33 @@ def main():
                 except Exception as e:
                     return False, str(e)
 
-            # Single action: Save and refresh cache (in the background-like flow)
-            if st.button("Save"):
+            # Single action: Save API key and refresh cache (if base/table configured)
+            if st.button("Save API Key"):
                 updates = {
                     'AIRTABLE_API_KEY': (st.session_state['airtable_manual']['api_key'] or env_api_key),
-                    'AIRTABLE_BASE_ID': (st.session_state['airtable_manual']['base_id'] or env_base_id),
-                    'AIRTABLE_TABLE': (st.session_state['airtable_manual']['table'] or env_table),
-                    'AIRTABLE_VIEW': (st.session_state['airtable_manual']['view'] or env_view),
-                    'AIRTABLE_CACHE_PATH': (st.session_state['airtable_manual']['cache_path'] or env_cache or 'data/airtable_mapping.json'),
-                    'AIRTABLE_APPROVALS_TABLE': (st.session_state['airtable_manual']['approvals_table'] or env_approvals or 'Approvals'),
                 }
                 ok, err = _write_env('.env', updates)
                 if ok:
                     # Build config from current form values and refresh cache file
                     try:
                         ak = updates['AIRTABLE_API_KEY']
-                        bid = updates['AIRTABLE_BASE_ID']
-                        tbl = updates['AIRTABLE_TABLE']
-                        vw = updates['AIRTABLE_VIEW'] or None
-                        cp = updates['AIRTABLE_CACHE_PATH'] or 'data/airtable_mapping.json'
+                        bid = env_base_id
+                        tbl = env_table
+                        vw = env_view or None
+                        cp = env_cache or 'data/airtable_mapping.json'
                         if not (ak and bid and tbl):
-                            st.warning("Saved to .env, but missing required fields to refresh cache (API_KEY/BASE_ID/TABLE).")
+                            st.warning("Saved API key. Airtable base/table must be configured in the environment to refresh cache.")
                         else:
                             cfg = _ATCfg(api_key=ak, base_id=bid, table_id_or_name=tbl, view=vw)
                             with st.spinner("Saving and refreshing Airtable cache..."):
                                 df = _at_load(cfg, cp, ttl_seconds=0)
                                 # Update app data immediately so it is used everywhere
                                 st.session_state['data'] = {'mapping': df, 'plan_json': get_active_plan_json(), '_source': 'airtable_live'}
-                            st.success("Saved and refreshed Airtable cache.")
-                            st.caption(f"Cache path: {cp}")
+                            st.success("Saved API key and refreshed Airtable cache.")
                     except Exception as e:
-                        st.warning(f"Saved to .env, but cache refresh failed: {e}")
+                        st.warning(f"Saved API key, but cache refresh failed: {e}")
                 else:
-                    st.error(f"Failed to write .env: {err}")
+                    st.error(f"Failed to write API key to .env: {err}")
 
         
 
@@ -580,7 +547,7 @@ def main():
             st.caption(f"Data source: **{data_source}**")
         with col_info2:
             if airtable_config:
-                st.caption(f"✅ Airtable: `{airtable_config['base_id']}/{airtable_config['approvals_table']}`")
+                st.caption("✅ Airtable connected")
             else:
                 st.caption("⚠️ Airtable not configured")
 
@@ -962,7 +929,53 @@ def main():
             # Human override / approval UI
             with human_col:
                 st.markdown("**Human Override & Approve**")
-                new_plan = st.text_input("Final Plan", value=current_plan, disabled=False)
+                # Build candidate plan options for a dropdown to avoid typos
+                candidates_for_dropdown = []
+                if isinstance(row['Raw Rec'], dict):
+                    candidates_for_dropdown = row['Raw Rec'].get('all_plans') or row['Raw Rec'].get('all_candidates', [])
+                plan_options = []
+                try:
+                    plan_options = [c.get('plan') for c in candidates_for_dropdown if c.get('plan')]
+                    # Deduplicate while preserving order
+                    plan_options = list(dict.fromkeys(plan_options))
+                except Exception:
+                    plan_options = []
+
+                # Determine default selection: prefer AI decision, else logic recommendation
+                ai_decisions = st.session_state.get('ai_decisions', {}) or {}
+                ai_for_account = ai_decisions.get(row['Account']) if isinstance(ai_decisions, dict) else None
+                ai_plan = None
+                if isinstance(ai_for_account, dict):
+                    parsed = ai_for_account.get('parsed') if isinstance(ai_for_account.get('parsed'), dict) else {}
+                    ai_plan = parsed.get('plan')
+
+                target_plan = ai_plan or current_plan
+                if target_plan and target_plan not in plan_options:
+                    plan_options = [target_plan] + plan_options
+
+                def _norm(s):
+                    return str(s or "").strip().lower()
+
+                default_idx = 0
+                if plan_options:
+                    # 1) exact normalized match
+                    for i, p in enumerate(plan_options):
+                        if _norm(p) == _norm(target_plan):
+                            default_idx = i
+                            break
+                    else:
+                        # 2) contains either way
+                        for i, p in enumerate(plan_options):
+                            pn = _norm(p)
+                            tn = _norm(target_plan)
+                            if tn and (tn in pn or pn in tn):
+                                default_idx = i
+                                break
+
+                new_plan = (
+                    st.selectbox("Final Plan", plan_options, index=default_idx if plan_options else 0)
+                    if plan_options else st.text_input("Final Plan", value=current_plan, disabled=False)
+                )
                 new_extras_str = st.text_area("Final Extras (comma-separated)", value=", ".join(current_extras), height=80)
                 new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
 
@@ -970,9 +983,29 @@ def main():
                     if not approved_by.strip():
                         st.error("Please enter your name in the sidebar.")
                     else:
+                        # Compute analytics for the manual decision and persist
+                        try:
+                            plan_feats = set(logic_engine.plan_definitions.get(new_plan, set()))
+                            user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                            extras_set = set(new_extras)
+                            cls = _classify_sets(plan_feats, user_feats, extras_set)
+                        except Exception:
+                            cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
+
+                        details_payload = {
+                            'plan': new_plan,
+                            'add-ons to compatability': [str(x).strip() for x in new_extras],
+                            'features on the house': list(cls.get('bloat_features', [])),
+                            'bloat_costly': list(cls.get('bloat_costly', [])),
+                            'gaFeatures': list(cls.get('ga', [])),
+                            'GA present in account': list(cls.get('ga_present', [])),
+                            'GA will appear with plan': list(cls.get('ga_will_appear', [])),
+                            'irrelevantFeatures': list(cls.get('irrelevant', [])),
+                        }
+
                         # Save to CSV and sync to Airtable with backup
                         success, msg = _sync_approval_to_airtable(
-                            store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip()
+                            store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
                         )
                         if success:
                             st.success(f"Saved and locked! {msg}")
@@ -998,11 +1031,64 @@ def main():
                 candidates = []
                 if isinstance(row['Raw Rec'], dict):
                     candidates = row['Raw Rec'].get('all_plans') or row['Raw Rec'].get('all_candidates', [])
+
+                # Build labels for display
                 option_labels = [
                     f"{c.get('plan')} (extras={c.get('extras_count', len(c.get('extras', [])))}, bloat={c.get('bloat_count', len(c.get('bloat_features', [])))}, paid_bloat={c.get('bloat_costly_count', len(c.get('bloat_costly', [])))})"
                     for c in candidates
                 ]
-                selected_idx = st.selectbox("Candidate Options", list(range(len(candidates))), format_func=lambda i: option_labels[i] if i < len(option_labels) else "") if candidates else None
+
+                # Align dropdown default with the agent/logic recommendation
+                # Prefer AI Decision plan (if present), else logic's recommended plan
+                ai_decisions = st.session_state.get('ai_decisions', {}) or {}
+                ai_for_account = ai_decisions.get(row['Account']) if isinstance(ai_decisions, dict) else None
+                ai_plan = None
+                if isinstance(ai_for_account, dict):
+                    parsed = ai_for_account.get('parsed') if isinstance(ai_for_account.get('parsed'), dict) else {}
+                    ai_plan = parsed.get('plan')
+
+                target_plan = ai_plan or current_plan
+                # Robust match: case-insensitive, trim, partial contains either way
+                norm = lambda s: str(s or "").strip().lower()
+                target_norm = norm(target_plan)
+                default_idx = 0
+                # 1) Exact normalized match
+                for i, c in enumerate(candidates):
+                    try:
+                        if norm(c.get('plan')) == target_norm:
+                            default_idx = i
+                            break
+                    except Exception:
+                        pass
+                else:
+                    # 2) Target contained in candidate plan name
+                    for i, c in enumerate(candidates):
+                        try:
+                            if target_norm and target_norm in norm(c.get('plan')):
+                                default_idx = i
+                                break
+                        except Exception:
+                            pass
+                    else:
+                        # 3) Candidate plan name contained in target
+                        for i, c in enumerate(candidates):
+                            try:
+                                if norm(c.get('plan')) and norm(c.get('plan')) in target_norm:
+                                    default_idx = i
+                                    break
+                            except Exception:
+                                pass
+
+                selected_idx = (
+                    st.selectbox(
+                        "Candidate Options",
+                        list(range(len(candidates))),
+                        index=default_idx if candidates else 0,
+                        format_func=lambda i: option_labels[i] if i < len(option_labels) else "",
+                    )
+                    if candidates
+                    else None
+                )
                 if selected_idx is not None:
                     cand = candidates[selected_idx]
                     st.caption("Preview of selected candidate")
@@ -1025,8 +1111,19 @@ def main():
                         else:
                             # Save to CSV and sync to Airtable with backup
                             cand_extras = [str(x).strip() for x in cand.get('extras', [])]
+                            # Build detailed analytics payload for Airtable/CSV
+                            details_payload = {
+                                'plan': cand.get('plan', current_plan),
+                                'add-ons to compatability': cand_extras,
+                                'features on the house': list(cls.get('bloat_features', [])),
+                                'bloat_costly': list(cls.get('bloat_costly', [])),
+                                'gaFeatures': list(cls.get('ga', [])),
+                                'GA present in account': list(cls.get('ga_present', [])),
+                                'GA will appear with plan': list(cls.get('ga_will_appear', [])),
+                                'irrelevantFeatures': list(cls.get('irrelevant', [])),
+                            }
                             success, msg = _sync_approval_to_airtable(
-                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip()
+                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
                             )
                             if success:
                                 st.success(f"Selected candidate approved and locked! {msg}")
@@ -1078,8 +1175,18 @@ def main():
                         else:
                             # Save to CSV and sync to Airtable with backup
                             ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                            details_payload = {
+                                'plan': parsed.get('plan', current_plan),
+                                'add-ons to compatability': ai_extras,
+                                'features on the house': list(cls.get('bloat_features', [])),
+                                'bloat_costly': list(cls.get('bloat_costly', [])),
+                                'gaFeatures': list(cls.get('ga', [])),
+                                'GA present in account': list(cls.get('ga_present', [])),
+                                'GA will appear with plan': list(cls.get('ga_will_appear', [])),
+                                'irrelevantFeatures': list(cls.get('irrelevant', [])),
+                            }
                             success, msg = _sync_approval_to_airtable(
-                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip()
+                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
                             )
                             if success:
                                 st.success(f"AI decision approved and locked! {msg}")

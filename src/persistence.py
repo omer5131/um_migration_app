@@ -16,8 +16,11 @@ BACKUP_PATH = str(_ROOT / "data" / "approvals_backup.csv")
 class ApprovalsStore:
     """Simple CSV-backed store for human-approved rows.
 
-    Schema:
+    Schema (CSV):
     - Account, Sub Type, Final Plan, Extras (comma-separated), Approved By, Approved At (epoch seconds)
+    - Plus optional analytics fields saved as columns when provided:
+      plan, add-ons to compatability, features on the house, bloat_costly,
+      gaFeatures, GA present in account, GA will appear with plan, irrelevantFeatures
     """
 
     def __init__(self, path: str = DEFAULT_PATH):
@@ -69,7 +72,8 @@ class ApprovalsStore:
         row["Extras"] = extras
         return row
 
-    def upsert(self, account: str, subtype: str, final_plan: str, extras: List[str], approved_by: str = "") -> None:
+    def upsert(self, account: str, subtype: str, final_plan: str, extras: List[str], approved_by: str = "",
+               details: Optional[Dict] = None) -> None:
         ts = int(time.time())
         extras_str = ", ".join(extras)
         idx = None
@@ -86,6 +90,17 @@ class ApprovalsStore:
             "Approved By": approved_by,
             "Approved At": ts,
         }
+
+        # Merge optional analytics fields, converting lists/dicts to JSON strings for CSV
+        if details and isinstance(details, dict):
+            for k, v in details.items():
+                if isinstance(v, (list, dict)):
+                    try:
+                        row[k] = json.dumps(v, ensure_ascii=False)
+                    except Exception:
+                        row[k] = str(v)
+                else:
+                    row[k] = v
 
         if idx is None:
             self._df = pd.concat([self._df, pd.DataFrame([row])], ignore_index=True)
@@ -131,6 +146,37 @@ class ApprovalsStore:
                     lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if pd.notna(x) and x is not None else None
                 )
 
+            # Attempt to parse JSON-string columns for list fields so Airtable can treat them as arrays if supported
+            list_like_columns = [
+                'add-ons to compatability',
+                'features on the house',
+                'bloat_costly',
+                'gaFeatures',
+                'GA present in account',
+                'GA will appear with plan',
+                'irrelevantFeatures',
+            ]
+            for col in list_like_columns:
+                if col in df_for_airtable.columns:
+                    def _maybe_list(x):
+                        if x is None:
+                            return None
+                        if isinstance(x, list):
+                            return x
+                        # Try JSON parse
+                        try:
+                            val = json.loads(x)
+                            if isinstance(val, list):
+                                return val
+                        except Exception:
+                            pass
+                        # Fallback: comma-separated -> list
+                        if isinstance(x, str):
+                            parts = [p.strip() for p in x.split(',') if p.strip()]
+                            return parts or x
+                        return x
+                    df_for_airtable[col] = df_for_airtable[col].apply(_maybe_list)
+
             # Sync to Airtable
             cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
             created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account')
@@ -145,7 +191,8 @@ class ApprovalsStore:
             return False, f"Airtable sync failed: {str(e)}", 0, 0
 
     def upsert_and_sync(self, account: str, subtype: str, final_plan: str, extras: List[str],
-                       approved_by: str = "", airtable_config: Optional[Dict] = None) -> Tuple[bool, str]:
+                       approved_by: str = "", airtable_config: Optional[Dict] = None,
+                       details: Optional[Dict] = None) -> Tuple[bool, str]:
         """Upsert approval to CSV and optionally sync to Airtable.
 
         Args:
@@ -159,8 +206,8 @@ class ApprovalsStore:
         Returns:
             Tuple of (success, message)
         """
-        # Save to CSV first
-        self.upsert(account, subtype, final_plan, extras, approved_by)
+        # Save to CSV first (with details if provided)
+        self.upsert(account, subtype, final_plan, extras, approved_by, details=details)
 
         # Try to sync to Airtable if config provided
         if airtable_config and all(k in airtable_config for k in ['api_key', 'base_id', 'table_id']):
