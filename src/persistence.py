@@ -137,45 +137,71 @@ class ApprovalsStore:
             # Convert timestamp to ISO 8601 format for Airtable
             df_for_airtable = self._df.copy()
 
+            # Clean Account field - remove newlines and extra whitespace
+            if 'Account' in df_for_airtable.columns:
+                df_for_airtable['Account'] = df_for_airtable['Account'].apply(
+                    lambda x: str(x).replace('\n', '').replace('\r', '').strip() if x and not pd.isna(x) else x
+                )
+
+            # Map column names to match Airtable field names
+            column_mapping = {
+                'add-ons to compatability': 'add-ons to compatibility',  # Fix typo
+                # Fixed field name typo: 'on the house' (was 'on the houes')
+                'features on the house': 'on the house',
+                'gaFeatures': 'GA features',  # Map to Airtable field name
+                'GA present in account': 'GA features copy',  # Map to Airtable field name
+                'GA will appear with plan': 'GA features copy 2',  # Map to Airtable field name
+            }
+            df_for_airtable = df_for_airtable.rename(columns=column_mapping)
+
             # Replace NaN values with None (JSON-compatible)
             df_for_airtable = df_for_airtable.replace({pd.NA: None, float('nan'): None})
             df_for_airtable = df_for_airtable.where(pd.notna(df_for_airtable), None)
 
             if 'Approved At' in df_for_airtable.columns:
                 df_for_airtable['Approved At'] = df_for_airtable['Approved At'].apply(
-                    lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if pd.notna(x) and x is not None else None
+                    lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if (x is not None and not pd.isna(x)) else None
                 )
 
-            # Attempt to parse JSON-string columns for list fields so Airtable can treat them as arrays if supported
+            # Convert list columns to comma-separated strings for Airtable
+            # Note: Using text format instead of multi-select to avoid choice validation issues
             list_like_columns = [
-                'add-ons to compatability',
-                'features on the house',
+                'add-ons to compatibility',  # Fixed typo: compatibility not compatability
+                'on the house',  # Maps from 'features on the house'
                 'bloat_costly',
-                'gaFeatures',
-                'GA present in account',
-                'GA will appear with plan',
+                'GA features',  # Maps to gaFeatures
+                'GA features copy',  # Maps to GA present in account
+                'GA features copy 2',  # Maps to GA will appear with plan
                 'irrelevantFeatures',
             ]
             for col in list_like_columns:
                 if col in df_for_airtable.columns:
-                    def _maybe_list(x):
-                        if x is None:
+                    def _list_to_text(x):
+                        """Convert lists/JSON to comma-separated text for Airtable."""
+                        if x is None or (isinstance(x, str) and not x.strip()):
                             return None
                         if isinstance(x, list):
-                            return x
+                            return ', '.join(str(item) for item in x) if x else None
                         # Try JSON parse
-                        try:
-                            val = json.loads(x)
-                            if isinstance(val, list):
-                                return val
-                        except Exception:
-                            pass
-                        # Fallback: comma-separated -> list
                         if isinstance(x, str):
-                            parts = [p.strip() for p in x.split(',') if p.strip()]
-                            return parts or x
-                        return x
-                    df_for_airtable[col] = df_for_airtable[col].apply(_maybe_list)
+                            try:
+                                val = json.loads(x)
+                                if isinstance(val, list):
+                                    return ', '.join(str(item) for item in val) if val else None
+                            except Exception:
+                                pass
+                            # Already a string, return as-is if not empty
+                            return x.strip() if x.strip() else None
+                        return str(x) if x else None
+                    df_for_airtable[col] = df_for_airtable[col].apply(_list_to_text)
+
+            # Only keep fields that exist in the Approvals table schema
+            # This prevents 422 errors for unknown fields (e.g., analytics-only columns)
+            allowed_fields = {
+                'Account', 'Sub Type', 'Final Plan', 'Extras', 'Approved By', 'Approved At'
+            }
+            existing_cols = [c for c in df_for_airtable.columns if c in allowed_fields]
+            df_for_airtable = df_for_airtable[existing_cols]
 
             # Sync to Airtable
             cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)

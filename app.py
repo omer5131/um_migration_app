@@ -55,6 +55,41 @@ def _preview_with_display_names(data):
     return out
 
 
+def _classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[str]) -> dict:
+    """Module-level helper to classify GA/irrelevant and compute bloat consistently.
+
+    - Applies precedence GA over Irrelevant (removed from comparisons)
+    - Computes bloat as (plan + extras) - user
+    - Identifies costly bloat using EXTRA_COST_FEATURES
+    """
+    ga_all = set(GA_FEATURES)
+    ga_present = {f for f in user_feats if str(f).strip() in ga_all}
+    ga_from_bundle = {f for f in (plan_feats | extras_set) if str(f).strip() in ga_all}
+    ga_will_appear = ga_from_bundle - ga_present
+    ga = ga_present | ga_will_appear
+    irr = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(IRRELEVANT_FEATURES)}
+    # Precedence GA over Irrelevant
+    irr -= ga
+    # Sanitize for comparison
+    plan_norm = set(plan_feats) - ga - irr
+    user_norm = set(user_feats) - ga - irr
+    extras_norm = set(extras_set) - ga - irr
+    effective_bundle = plan_norm | extras_norm
+    bloat_features = sorted(effective_bundle - user_norm)
+    cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
+    bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
+    return {
+        'ga': sorted(ga),
+        'ga_present': sorted(ga_present),
+        'ga_will_appear': sorted(ga_will_appear),
+        'irrelevant': sorted(irr),
+        'plan_norm': plan_norm,
+        'user_norm': user_norm,
+        'extras_norm': extras_norm,
+        'bloat_features': bloat_features,
+        'bloat_costly': bloat_costly,
+    }
+
 def _get_airtable_config():
     """Get Airtable configuration from session state (Data Sources) or config file.
 
@@ -62,10 +97,11 @@ def _get_airtable_config():
     """
     # First check if user manually configured in Data Sources
     manual_config = st.session_state.get('airtable_manual', {})
-    api_key = manual_config.get('api_key') or AT_CFG.get('API_KEY')
-    base_id = manual_config.get('base_id') or AT_CFG.get('BASE_ID')
-    table_id = manual_config.get('table') or AT_CFG.get('TABLE')
-    approvals_table = manual_config.get('approvals_table') or AT_CFG.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3')
+    # Use manual config only if it's not empty, otherwise fallback to env config
+    api_key = manual_config.get('api_key', '').strip() or AT_CFG.get('API_KEY', '').strip()
+    base_id = manual_config.get('base_id', '').strip() or AT_CFG.get('BASE_ID', '').strip()
+    table_id = manual_config.get('table', '').strip() or AT_CFG.get('TABLE', '').strip()
+    approvals_table = manual_config.get('approvals_table', '').strip() or AT_CFG.get('APPROVALS_TABLE', 'tblWWegam2OOTYpv3').strip()
 
     if api_key and base_id:
         return {
@@ -86,10 +122,19 @@ def _sync_approval_to_airtable(store, account: str, subtype: str, plan: str, ext
         config = _get_airtable_config()
 
         if config:
+            # Validate config before using
+            api_key = config.get('api_key', '').strip()
+            base_id = config.get('base_id', '').strip()
+            table_id = config.get('approvals_table', '').strip()
+
+            if not api_key or not base_id or not table_id:
+                store.upsert(account, subtype, plan, extras, approved_by, details=details)
+                return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
+
             airtable_config = {
-                'api_key': config['api_key'],
-                'base_id': config['base_id'],
-                'table_id': config['approvals_table']
+                'api_key': api_key,
+                'base_id': base_id,
+                'table_id': table_id
             }
             return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config, details=details)
         else:
@@ -106,6 +151,18 @@ st.set_page_config(layout="wide", page_title="Migration AI Tool")
 
 def main():
     st.title("Account Migration Engine 🤖")
+
+    # Initialize Airtable config in session state if not present
+    if "airtable_initialized" not in st.session_state:
+        st.session_state["airtable_initialized"] = True
+        # Clear any stale manual config that might have empty values
+        if "airtable_manual" in st.session_state:
+            manual = st.session_state["airtable_manual"]
+            # Remove keys with empty values
+            st.session_state["airtable_manual"] = {
+                k: v for k, v in manual.items()
+                if v and str(v).strip()
+            }
 
     # Attempt auto-load from Airtable once per session
     if "auto_airtable_attempted" not in st.session_state:
@@ -150,6 +207,19 @@ def main():
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
 
     st.sidebar.header("Configuration")
+
+    # Show Airtable sync status in sidebar
+    airtable_cfg = _get_airtable_config()
+    if airtable_cfg:
+        st.sidebar.success("✅ Airtable sync enabled")
+        if st.sidebar.button("🔄 Reset Airtable Config", help="Clear cached config and reload from .env"):
+            st.session_state.pop("airtable_manual", None)
+            st.session_state.pop("airtable_initialized", None)
+            st.rerun()
+    else:
+        st.sidebar.warning("⚠️ Airtable sync disabled")
+        st.sidebar.caption("Configure in Data Sources tab")
+
     openai_key_input = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
     # Fallback to Streamlit secrets if input is empty
     try:
@@ -754,35 +824,7 @@ def main():
             progress = st.progress(0)
             total = len(df_filtered)
 
-            # Helpers for GA/Irrelevant classification
-            def _classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[str]) -> dict:
-                ga_all = set(GA_FEATURES)
-                ga_present = {f for f in user_feats if str(f).strip() in ga_all}
-                ga_from_bundle = {f for f in (plan_feats | extras_set) if str(f).strip() in ga_all}
-                ga_will_appear = ga_from_bundle - ga_present
-                ga = ga_present | ga_will_appear
-                irr = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(IRRELEVANT_FEATURES)}
-                # Precedence GA over Irrelevant
-                irr -= ga
-                # Sanitize for comparison
-                plan_norm = plan_feats - ga - irr
-                user_norm = user_feats - ga - irr
-                extras_norm = extras_set - ga - irr
-                effective_bundle = plan_norm | extras_norm
-                bloat_features = sorted(effective_bundle - user_norm)
-                cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
-                bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
-                return {
-                    'ga': sorted(ga),
-                    'ga_present': sorted(ga_present),
-                    'ga_will_appear': sorted(ga_will_appear),
-                    'irrelevant': sorted(irr),
-                    'plan_norm': plan_norm,
-                    'user_norm': user_norm,
-                    'extras_norm': extras_norm,
-                    'bloat_features': bloat_features,
-                    'bloat_costly': bloat_costly,
-                }
+            # Helpers moved to module scope: _classify_sets(plan_feats, user_feats, extras_set)
 
             for i, row in df_filtered.iterrows():
                 account_name = row.get('name', str(i))

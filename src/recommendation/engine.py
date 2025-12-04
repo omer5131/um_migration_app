@@ -12,6 +12,7 @@ from src.config import (
     IRRELEVANT_FEATURES,
 )
 from src.utils import parse_feature_list, clean_feature_name
+from src.plan_definitions import get_add_on_plans
 
 # Default soft-matching dictionary (display name -> canonical name)
 DEFAULT_SYNONYMS: Dict[str, str] = {
@@ -76,6 +77,12 @@ class MigrationLogic:
         # Classification sets (canonicalized)
         self.ga_set: Set[str] = {canonicalize(f, self.synonyms) for f in GA_FEATURES}
         self.irrelevant_set: Set[str] = {canonicalize(f, self.synonyms) for f in IRRELEVANT_FEATURES}
+        # Add-on plans that can be aggregated on top of any base plan
+        raw_addons = get_add_on_plans()
+        self.add_on_plans: Dict[str, Set[str]] = {
+            str(name): {canonicalize(feat, self.synonyms) for feat in (feats or [])}
+            for name, feats in (raw_addons or {}).items()
+        }
 
     def _classify(self, features: Iterable[str]) -> dict:
         """Classify into GA / Irrelevant / Normal. Precedence: GA -> Irrelevant -> Normal."""
@@ -176,11 +183,23 @@ class MigrationLogic:
         valid_candidates: List[dict] = []  # filtered list used for auto-recommendation
         all_plan_features: Set[str] = set().union(*self.plan_definitions.values()) if self.plan_definitions else set()
         synonym_hits = {f for f in raw_user_features if canonicalize(f, self.synonyms) != clean_feature_name(f)}
+        # Pre-compute add-on coverage: only the subset of add-on features used by the account
+        applied_add_ons: List[str] = []
+        add_on_cover: Set[str] = set()
+        for addon_name, addon_feats in self.add_on_plans.items():
+            used = {f for f in addon_feats if f in user_features}
+            if used:
+                add_on_cover |= used
+                applied_add_ons.append(addon_name)
+
         for plan in candidates:
+            # Base plan features
             plan_features_raw = {clean_feature_name(f) for f in self.plan_definitions.get(plan, set())}
+            # Combine with applicable add-on features actually used by the account
+            combined_plan_features = plan_features_raw | add_on_cover
             # Classify and sanitize
             u = self._classify(user_features)
-            p = self._classify(plan_features_raw)
+            p = self._classify(combined_plan_features)
             user_norm = u["normal"]
             plan_norm = p["normal"]
 
@@ -209,6 +228,7 @@ class MigrationLogic:
 
             row_data = {
                 "plan": plan,
+                "addOnPlans": list(applied_add_ons),
                 "covered_features": covered,
                 "extras": extras,
                 "bloat_features": bloat,
@@ -272,6 +292,7 @@ class MigrationLogic:
         return {
             "status": "Success",
             "recommended_plan": winner["plan"],
+            "addOnPlans": list(applied_add_ons),
             "covered_features": winner["covered_features"],
             "extras": winner["extras"],
             "bloat_features": winner["bloat_features"],
@@ -288,6 +309,7 @@ class MigrationLogic:
             "all_candidates": [
                 {
                     "plan": a["plan"],
+                    "addOnPlans": a.get("addOnPlans", []),
                     "extras": a["extras"],
                     "extras_weighted": a["extras_weighted"],
                     "bloat_features": a["bloat_features"],
@@ -309,6 +331,7 @@ class MigrationLogic:
             "all_plans": [
                 {
                     "plan": a["plan"],
+                    "addOnPlans": a.get("addOnPlans", []),
                     "extras": a["extras"],
                     "extras_weighted": a["extras_weighted"],
                     "bloat_features": a["bloat_features"],
@@ -346,8 +369,15 @@ class MigrationLogic:
         # Classify and sanitize
         u = self._classify(user_canon)
         e = self._classify(extras_canon)
-        plan_features_raw = list(self.plan_definitions.get(plan_name, set()))
-        p = self._classify(plan_features_raw)
+        plan_features_raw = set(self.plan_definitions.get(plan_name, set()))
+        # Apply add-on coverage for human override context as well
+        add_on_cover: Set[str] = set()
+        for addon_name, addon_feats in self.add_on_plans.items():
+            used = {f for f in addon_feats if f in set(user_canon)}
+            if used:
+                add_on_cover |= used
+        combined_plan_features = list(plan_features_raw | add_on_cover)
+        p = self._classify(combined_plan_features)
 
         user_norm = u["normal"]
         plan_norm = p["normal"]

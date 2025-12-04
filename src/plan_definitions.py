@@ -7,7 +7,7 @@ Single source of truth is data/plan_json.json when present.
 We keep only a minimal default (Global.GA) in code, to avoid hardcoding plans.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import os
 import json
 
@@ -66,7 +66,8 @@ def get_flat_plan_json() -> Dict[str, List[str]]:
     """
     flat: Dict[str, set] = {}
     for family, plans in NESTED_PLAN_JSON.items():
-        if str(family).strip().upper() == "EXTRAS":
+        fam_upper = str(family).strip().upper()
+        if fam_upper in {"EXTRAS", "ADD_ONS"}:
             continue
         if isinstance(plans, dict):
             for plan_name, feats in plans.items():
@@ -98,7 +99,8 @@ def _flatten_if_nested(obj: dict) -> Dict[str, List[str]]:
 
     flat: Dict[str, set] = {}
     for family, plans in (obj or {}).items():
-        if str(family).strip().upper() == "EXTRAS":
+        fam_upper = str(family).strip().upper()
+        if fam_upper in {"EXTRAS", "ADD_ONS"}:
             # ignore extras in plan mapping
             continue
         if isinstance(plans, dict):
@@ -133,3 +135,27 @@ def get_active_plan_json(path: str = "data/plan_json.json") -> Dict[str, List[st
         pass
     return _flatten_if_nested(DEFAULT_NESTED_PLAN_JSON)
 
+
+def get_add_on_plans(path: str = "data/plan_json.json") -> Dict[str, List[str]]:
+    """Return aggregatable add-on plans mapping: {plan_name: [features]}.
+
+    Convention: In nested plan JSON, a top-level family named 'ADD_ONS' contains
+    add-on plans that can be combined with base plans.
+
+    If the file is flat or missing 'ADD_ONS', returns an empty dict.
+    """
+    try:
+        nested = _load_nested_plan_from_file(path)
+        if not isinstance(nested, dict):
+            return {}
+        add_ons = nested.get("ADD_ONS")
+        result: Dict[str, List[str]] = {}
+        if isinstance(add_ons, dict):
+            for plan_name, feats in add_ons.items():
+                if isinstance(feats, list):
+                    cleaned = [str(x).strip() for x in feats if str(x).strip()]
+                    if cleaned:
+                        result[str(plan_name).strip()] = cleaned
+        return result
+    except Exception:
+        return {}

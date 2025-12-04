@@ -166,9 +166,14 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
             # Check for NaN values (float NaN)
             if isinstance(v, float) and pd.isna(v):
                 continue
-            # Check for pandas NA
-            if pd.isna(v):
-                continue
+            # Check for pandas NA (but not for lists/arrays)
+            if not isinstance(v, (list, dict)):
+                try:
+                    if pd.isna(v):
+                        continue
+                except (TypeError, ValueError):
+                    # pd.isna() may fail on some types, just keep the value
+                    pass
             fields[k] = v
 
         if key_val in existing:
@@ -183,14 +188,29 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
     for batch in _chunk(to_create, 10):
         payload = {"records": batch, "typecast": typecast}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            # Provide actionable context when Airtable rejects the payload (e.g., 422)
+            details = resp.text[:1000] if hasattr(resp, "text") else str(e)
+            sample_keys = list(batch[0].get("fields", {}).keys()) if batch else []
+            raise RuntimeError(
+                f"Airtable create failed: HTTP {getattr(resp, 'status_code', 'unknown')} | sample field keys: {sample_keys} | response: {details}"
+            ) from e
         created += len(resp.json().get("records", []))
 
     updated = 0
     for batch in _chunk(to_update, 10):
         payload = {"records": batch, "typecast": typecast}
         resp = requests.patch(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            details = resp.text[:1000] if hasattr(resp, "text") else str(e)
+            sample_keys = list(batch[0].get("fields", {}).keys()) if batch else []
+            raise RuntimeError(
+                f"Airtable update failed: HTTP {getattr(resp, 'status_code', 'unknown')} | sample field keys: {sample_keys} | response: {details}"
+            ) from e
         updated += len(resp.json().get("records", []))
 
     return created, updated
@@ -211,9 +231,14 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
         # Check for NaN values (float NaN)
         if isinstance(v, float) and pd.isna(v):
             continue
-        # Check for pandas NA
-        if pd.isna(v):
-            continue
+        # Check for pandas NA (but not for lists/arrays)
+        if not isinstance(v, (list, dict)):
+            try:
+                if pd.isna(v):
+                    continue
+            except (TypeError, ValueError):
+                # pd.isna() may fail on some types, just keep the value
+                pass
         clean_fields[k] = v
 
     existing = _fetch_all_by_key(cfg, key_field)
@@ -225,11 +250,22 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
         rec_id = existing[key_val]["id"]
         payload = {"records": [{"id": rec_id, "fields": clean_fields}], "typecast": typecast}
         resp = requests.patch(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            details = resp.text[:1000] if hasattr(resp, "text") else str(e)
+            raise RuntimeError(
+                f"Airtable update failed: HTTP {getattr(resp, 'status_code', 'unknown')} | field keys: {list(clean_fields.keys())} | response: {details}"
+            ) from e
         return rec_id
     else:
         payload = {"records": [{"fields": clean_fields}], "typecast": typecast}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            details = resp.text[:1000] if hasattr(resp, "text") else str(e)
+            raise RuntimeError(
+                f"Airtable create failed: HTTP {getattr(resp, 'status_code', 'unknown')} | field keys: {list(clean_fields.keys())} | response: {details}"
+            ) from e
         return resp.json()["records"][0]["id"]
-

@@ -16,6 +16,8 @@
     ],
     "Shipowners Advanced": [
       "hideRuleEngine",
+      "newAdvancedSearch",
+      "savedQueriesNotifications",
       "complianceMode",
       "weatherLayer",
       "liveChat",
@@ -41,9 +43,10 @@
     "Shipowners Premium": [
       "hideRuleEngine",
       "complianceMode",
+      "newAdvancedSearch",
+      "savedQueriesNotifications",
       "liveChat",
       "complianceLabel",
-      "newAdvancedSearch",
       "sendHeartbeat",
       "savedQueriesNotifications",
       "portStateControl",
@@ -76,6 +79,7 @@
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "hideSafetyRisk",
@@ -85,6 +89,7 @@
       "portProfile"
     ],
     "Bunkering Advanced": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "weatherLayer",
@@ -112,6 +117,7 @@
       "portProfile"
     ],
     "Bunkering Premium": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "liveChat",
@@ -144,11 +150,13 @@
   "Insurer": {
     "Insurer Core": [
       "hideRuleEngine",
+      "newAdvancedSearch",
       "complianceMode",
       "weatherLayer",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "hideSafetyRisk",
@@ -159,13 +167,15 @@
       "enableExportCompanyPdfReport",
       "portProfile"
     ],
-    "Insurer Advanced": [
+    "Insurer Advanced": [ 
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "weatherLayer",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "hideSafetyRisk",
@@ -179,11 +189,13 @@
       "maiExpertVesselAdverseMedia"
     ],
     "Insurer Premium": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "visualLinkAnalysis",
@@ -205,12 +217,14 @@
 
   "Commodity Trader": {
     "Commodity Trader Core": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "weatherLayer",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "hideSafetyRisk",
@@ -222,12 +236,14 @@
       "portProfile"
     ],
     "Commodity Trader Advanced": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "weatherLayer",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "hideSafetyRisk",
@@ -242,11 +258,13 @@
       "maiExpertVesselAdverseMedia"
     ],
     "Commodity Trader Premium": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
       "liveChat",
       "complianceLabel",
       "sendHeartbeat",
+      "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "visualLinkAnalysis",
@@ -284,7 +302,7 @@
       "nasAccidentsActivity",
       "newNasSideBarDesign",
       "nasAddVesselsToVoi",
-      "shadowFleetVOIs",
+      
       "weatherLayer",
       "nasPremiumCsvColumns"
     ]
@@ -305,16 +323,17 @@
       "companyProfile",
       "exploreCompanies",
       "portProfile",
+      "newAdvancedSearch",  
       "savedQueriesNotifications",
       "hideSafetyRisk",
       "hideMapTimelineOnVesselProfile",
       "newNasSideBarDesign",
       "nasAccidentsActivity",
       "uboData",
-      "shadowFleetVOIs",
       "weatherLayer"
     ],
     "Financial Institutions Advanced": [
+      "newAdvancedSearch",
       "hideRuleEngine",
       "warRiskArea",
       "nasAccidentsActivity",
@@ -335,10 +354,38 @@
       "uboData",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
-      "shadowFleetVOIs",
+      
       "nasAddVesselsToVoi",
       "visualLinkAnalysis",
       "weatherLayer"
+    ],
+    "Financial Institutions Premium ": [
+      "newAdvancedSearch",
+      "hideRuleEngine",
+      "warRiskArea",
+      "nasAccidentsActivity",
+      "complianceMode",
+      "softAoi",
+      "liveChat",
+      "complianceLabel",
+      "enableExportCompanyPdfReport",
+      "sendHeartbeat",
+      "portStateControl",
+      "userAlreadyLoggedInWarning",
+      "companyProfile",
+      "exploreCompanies",
+      "portProfile",
+      "savedQueriesNotifications",
+      "hideMapTimelineOnVesselProfile",
+      "newNasSideBarDesign",
+      "uboData",
+      "maiExpertVesselSummary",
+      "maiExpertVesselAdverseMedia",      
+      "nasAddVesselsToVoi",
+      "visualLinkAnalysis",
+      "weatherLayer",
+      "cddScreening",
+      "wetCargoData"
     ]
   },
 
@@ -354,15 +401,16 @@
       "portStateControl",
       "userAlreadyLoggedInWarning",
       "portProfile",
+      "newAdvancedSearch",
       "savedQueriesNotifications",
       "hideSafetyRisk",
       "hideMapTimelineOnVesselProfile",
       "newNasSideBarDesign",
       "nasAccidentsActivity",
-      "shadowFleetVOIs",
       "weatherLayer"
     ],
     "Oil & Energy Advanced": [
+      "newAdvancedSearch",
       "liveChat",
       "vesselsLists",
       "complianceLabel",
@@ -380,7 +428,6 @@
       "wetCargoData",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
-      "shadowFleetVOIs",
       "nasAddVesselsToVoi",
       "weatherLayer",
       "hideBorderSecurityRisk",
@@ -388,6 +435,7 @@
       "hideSafetyRisk"
     ],
     "Oil & Energy Premium": [
+      "newAdvancedSearch",
       "liveChat",
       "vesselsLists",
       "complianceLabel",
@@ -405,7 +453,7 @@
       "wetCargoData",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
-      "shadowFleetVOIs",
+      
       "nasAddVesselsToVoi",
       "weatherLayer",
       "uboData",
@@ -425,7 +473,6 @@
       "newsFeed",
       "visualLinkAnalysis",
       "stsClassification",
-      "nasAgGridTable",
       "nasPremiumCsvColumns",
       "underwaterCables"
     ]

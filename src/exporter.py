@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import os
 import pandas as pd
+from src.recommendation.engine import MigrationLogic
+from src.utils import parse_feature_list
 
 
 def _flatten_plan_json(plan_json: Dict[str, list]) -> pd.DataFrame:
@@ -45,15 +47,59 @@ def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
 
     plan_df = _flatten_plan_json(plan_json)
 
+    # Build recommendations per account (deterministic engine output, not human overrides)
+    rec_df = pd.DataFrame()
+    try:
+        if not mapping_df.empty and isinstance(plan_json, dict) and plan_json:
+            logic = MigrationLogic(None, plan_json)
+            df = mapping_df.copy()
+            name_col = "name" if "name" in df.columns else (
+                "SalesForce_Account_NAME" if "SalesForce_Account_NAME" in df.columns else None
+            )
+            if name_col is None:
+                # Create a fallback name for indexing
+                df[name_col := "Account"] = [f"Account {i+1}" for i in range(len(df))]
+
+            subtype_col = (
+                "Sub Type" if "Sub Type" in df.columns else (
+                    "Subtype" if "Subtype" in df.columns else None
+                )
+            )
+            rows: List[dict] = []
+            for _, row in df.iterrows():
+                # The engine reads from keys: 'Sub Type'/'Subtype' and 'featureNames'
+                account_row = row.to_dict()
+                # Ensure featureNames present (engine will parse if str/JSON list)
+                account_row.setdefault("featureNames", account_row.get("featureNames", []))
+                rec = logic.recommend(account_row)
+                rows.append({
+                    "Account": row.get(name_col),
+                    "Sub Type": row.get(subtype_col) if subtype_col else None,
+                    "Recommended Plan": rec.get("recommended_plan"),
+                    "Add-on Plans": ", ".join(rec.get("addOnPlans", [])),
+                    "Extras": ", ".join([str(x) for x in rec.get("extras", [])]),
+                    "Extras Count": rec.get("extras_count"),
+                    "Bloat Count": rec.get("bloat_score"),
+                    "Paid Bloat Count": rec.get("bloat_costly_count"),
+                    "Migration Confidence": rec.get("migration_confidence"),
+                    "Status": rec.get("status"),
+                })
+            rec_df = pd.DataFrame(rows)
+    except Exception:
+        # Keep exporter resilient; if recommendations fail, omit the sheet
+        rec_df = pd.DataFrame()
+
     bio = BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         out_df.to_excel(writer, sheet_name="Account<>CSM<>Project (updated)", index=False)
         approvals_df.to_excel(writer, sheet_name="Approvals", index=False)
         plan_df.to_excel(writer, sheet_name="Plan <> FF", index=False)
+        if not rec_df.empty:
+            rec_df.to_excel(writer, sheet_name="Recommendations Plan", index=False)
         meta = pd.DataFrame(
             {
-                "Key": ["Rows (mapping)", "Rows (approvals)", "Plans"],
-                "Value": [len(out_df), len(approvals_df), len(plan_json or {})],
+                "Key": ["Rows (mapping)", "Rows (approvals)", "Plans", "Rows (recommendations)"],
+                "Value": [len(out_df), len(approvals_df), len(plan_json or {}), len(rec_df)],
             }
         )
         meta.to_excel(writer, sheet_name="Metadata", index=False)
@@ -67,4 +113,3 @@ def save_updated_excel_file(path: str, data: Dict, approvals_df: pd.DataFrame) -
     with open(path, "wb") as f:
         f.write(content)
     return path
-

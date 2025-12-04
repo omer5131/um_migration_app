@@ -63,12 +63,15 @@ GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 # Global Availability (GA) features — always available and not counted as extras/bloat
 GA_FEATURES = [
     "activitySequences",
+    "softAoi"
+    "nasAgGridTable",
     "mapMarkers",
-    "nasAddVesselsToVoi",
+    "weatherLayer",
     "nasTransmissionInAreaActivityType",
+    "searchDraftBreadthFilters",
     "nasAccidentsActivity",
+    "weatherLayer",
     "warRiskArea",
-    "newAdvancedSearch",
     "newNasRiskDesign",
     "newNasSideBarDesign",
     "darkFleetVOI",
@@ -86,7 +89,6 @@ IRRELEVANT_FEATURES = [
     "advancedSearchOwners",
     "elasticSearch",
     "meetings",
-    "newAdvancedSearch",
 ]
 
 # Mapping SubType to specific keywords found in the 'PLAN' column of Plan <> FF.csv
