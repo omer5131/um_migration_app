@@ -134,7 +134,7 @@ def main():
     st.sidebar.header("Navigation")
     if st.session_state.get("auto_airtable_ok"):
         # Airtable loaded successfully - show main tabs only
-        nav_options = ["Recommendations & Agent", "Plan Mapping", "Approved"]
+        nav_options = ["User Guide", "Recommendations & Agent", "Plan Mapping", "Approved"]
         nav_index = 0
         st.sidebar.success("✅ Airtable connected")
         st.sidebar.caption("Data loaded from Airtable")
@@ -142,7 +142,7 @@ def main():
         # Hide Airtable table details from UI; show only generic status
     else:
         # Airtable not loaded - show Data Sources tab
-        nav_options = ["Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
+        nav_options = ["User Guide", "Data Sources", "Recommendations & Agent", "Plan Mapping", "Approved"]
         nav_index = 0
         if st.session_state.get("auto_airtable_error"):
             st.sidebar.warning(f"⚠️ Airtable: {st.session_state['auto_airtable_error'][:50]}")
@@ -183,6 +183,78 @@ def main():
                 st.session_state["data"] = {"plan_json": saved_plan_json}
         except Exception:
             pass
+
+    if tab == "User Guide":
+        st.subheader("User Guide")
+        st.markdown("Welcome to the Account Migration Engine. This guide explains the goals and the steps to run migrations safely and consistently.")
+
+        st.header("Goals")
+        st.markdown(
+            "- Recommend the best destination plan for each account based on current feature usage.\n"
+            "- Minimize extras and eliminate paid bloat by design.\n"
+            "- Let you compare candidates, apply AI guidance, and approve the final selection.\n"
+            "- Persist approvals to CSV and Airtable, and export an updated Excel for handoff."
+        )
+
+        st.header("Quick Start")
+        with st.expander("1) Load data sources", expanded=True):
+            st.markdown(
+                "- Preferred: Airtable auto-load (if configured).\n"
+                "- If needed, open Data Sources and either:\n"
+                "  - Enter AIRTABLE_API_KEY only (Base/Table are preconfigured), or\n"
+                "  - Upload Excel, or\n"
+                "  - Use built-in CSVs, or\n"
+                "  - Connect a Google Sheet (requires a Service Account JSON)."
+            )
+        with st.expander("2) Run recommendations", expanded=True):
+            st.markdown(
+                "- Open 'Recommendations & Agent'.\n"
+                "- Adjust filters (CSM, Sub Type, Segment).\n"
+                "- Tune 'Paid bloat penalty' if needed.\n"
+                "- Click 'Run Migration Logic' to generate recommendations and metrics."
+            )
+        with st.expander("3) Review and choose", expanded=True):
+            st.markdown(
+                "- Use the summary table and filters to focus.\n"
+                "- Select an account to open the review panel.\n"
+                "- Optional: Ask Agent to review or request an AI Decision.\n"
+                "- In 'Choose from Candidates', the dropdown defaults to the recommended plan; switch to compare others and preview impact.\n"
+                "- Approve via:\n"
+                "  - 'Approve Selected Option & Lock' (from candidates), or\n"
+                "  - 'Approve AI Decision & Lock', or\n"
+                "  - 'Save & Lock (Human Approved)' after selecting 'Final Plan' and extras."
+            )
+        with st.expander("4) Persist and export", expanded=True):
+            st.markdown(
+                "- Approvals are saved to CSV and, when configured, synced to Airtable automatically.\n"
+                "- Click 'Generate Updated Excel' to produce an updated workbook.\n"
+                "- If connected to Google Sheets, you can sync approvals and the updated mapping back to the sheet.\n"
+                "- See the 'Approved' tab to view/search approvals and optionally sync them to Airtable or download CSV."
+            )
+
+        st.header("What gets saved on approval")
+        st.markdown(
+            "- Core: Account, Sub Type, Final Plan, Extras, Approved By, Approved At.\n"
+            "- Analytics for follow-up: plan, add-ons to compatability, features on the house, bloat_costly, gaFeatures, GA present in account, GA will appear with plan, irrelevantFeatures."
+        )
+
+        st.header("Tips & Notes")
+        st.markdown(
+            "- Only the Airtable API key is entered in the UI when needed; Base/Table IDs are preconfigured.\n"
+            "- The candidates dropdown auto-selects the system recommendation but remains editable.\n"
+            "- 'Final Plan' is a dropdown of candidates to prevent typos; you can still adjust extras manually.\n"
+            "- Paid bloat is disallowed by design in AI selection; human overrides compute and store full analytics too."
+        )
+
+        st.header("Troubleshooting")
+        st.markdown(
+            "- Airtable not configured: the app falls back to CSV; add an API key if asked.\n"
+            "- No candidates: ensure the plan mapping is loaded (Data Sources) and Sub Type is correct.\n"
+            "- OpenAI errors: provide an API key in the sidebar for AI features.\n"
+            "- Cache refresh issues: use Data Sources → Airtable → Save API Key again, or reload the app."
+        )
+
+        st.stop()
 
     if tab == "Data Sources":
         st.subheader("Connect Data Sources")
