@@ -121,9 +121,14 @@ class ApprovalsStore:
 
             # Convert timestamp to ISO 8601 format for Airtable
             df_for_airtable = self._df.copy()
+
+            # Replace NaN values with None (JSON-compatible)
+            df_for_airtable = df_for_airtable.replace({pd.NA: None, float('nan'): None})
+            df_for_airtable = df_for_airtable.where(pd.notna(df_for_airtable), None)
+
             if 'Approved At' in df_for_airtable.columns:
                 df_for_airtable['Approved At'] = df_for_airtable['Approved At'].apply(
-                    lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if pd.notna(x) else None
+                    lambda x: datetime.fromtimestamp(int(x)).strftime('%Y-%m-%dT%H:%M:%S.000Z') if pd.notna(x) and x is not None else None
                 )
 
             # Sync to Airtable

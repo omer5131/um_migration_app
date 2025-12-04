@@ -12,3 +12,4 @@
             
 /Users/omer.barhanin/migtation script/src/data_loader.py:206: FutureWarning: Passing bytes to 'read_excel' is deprecated and will be removed in a future version. To read from a byte string, wrap it in a `BytesIO` object.
   dfs['mapping'] = pd.read_excel(io=file_bytes, sheet_name=sheet, engine='openpyxl')
+  Stopping...

@@ -158,7 +158,19 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
         key_val = str(row.get(key_field, "")).strip()
         if not key_val:
             continue
-        fields = {k: v for k, v in row.items() if v is not None}
+        # Filter out None, NaN, and convert numeric NaN to None
+        fields = {}
+        for k, v in row.items():
+            if v is None:
+                continue
+            # Check for NaN values (float NaN)
+            if isinstance(v, float) and pd.isna(v):
+                continue
+            # Check for pandas NA
+            if pd.isna(v):
+                continue
+            fields[k] = v
+
         if key_val in existing:
             to_update.append({"id": existing[key_val]["id"], "fields": fields})
         else:
@@ -190,6 +202,20 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
     key_val = str(fields.get(key_field, "")).strip()
     if not key_val:
         raise ValueError(f"Missing key field '{key_field}' in fields")
+
+    # Clean fields: remove None and NaN values
+    clean_fields = {}
+    for k, v in fields.items():
+        if v is None:
+            continue
+        # Check for NaN values (float NaN)
+        if isinstance(v, float) and pd.isna(v):
+            continue
+        # Check for pandas NA
+        if pd.isna(v):
+            continue
+        clean_fields[k] = v
+
     existing = _fetch_all_by_key(cfg, key_field)
 
     url = f"https://api.airtable.com/v0/{cfg.base_id}/{_encode_segment(cfg.table_id_or_name)}"
@@ -197,12 +223,12 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
 
     if key_val in existing:
         rec_id = existing[key_val]["id"]
-        payload = {"records": [{"id": rec_id, "fields": fields}], "typecast": typecast}
+        payload = {"records": [{"id": rec_id, "fields": clean_fields}], "typecast": typecast}
         resp = requests.patch(url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         return rec_id
     else:
-        payload = {"records": [{"fields": fields}], "typecast": typecast}
+        payload = {"records": [{"fields": clean_fields}], "typecast": typecast}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         return resp.json()["records"][0]["id"]

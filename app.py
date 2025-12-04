@@ -26,6 +26,8 @@ from src.json_reorder import reorder_features_json
 _DISPLAY_KEY_MAP = {
     "extras": "add-ons to compatability",
     "bloat_features": "features on the house",
+    "gaFeaturesPresent": "GA present in account",
+    "gaFeaturesWillAppear": "GA will appear with plan",
 }
 
 
@@ -38,12 +40,18 @@ def _preview_with_display_names(data):
         "bloat_features",
         "bloat_costly",
         "gaFeatures",
+        "gaFeaturesPresent",
+        "gaFeaturesWillAppear",
         "irrelevantFeatures",
     ]
     out = {}
     for k in order:
         display = _DISPLAY_KEY_MAP.get(k, k)
-        out[display] = ordered.get(k, []) if k != "plan" else ordered.get(k)
+        # Prefer value from ordered (known keys), otherwise from original data
+        if k == "plan":
+            out[display] = ordered.get(k) if ordered.get(k) is not None else data.get(k)
+        else:
+            out[display] = ordered.get(k, data.get(k, []))
     return out
 
 
@@ -709,7 +717,11 @@ def main():
 
             # Helpers for GA/Irrelevant classification
             def _classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[str]) -> dict:
-                ga = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(GA_FEATURES)}
+                ga_all = set(GA_FEATURES)
+                ga_present = {f for f in user_feats if str(f).strip() in ga_all}
+                ga_from_bundle = {f for f in (plan_feats | extras_set) if str(f).strip() in ga_all}
+                ga_will_appear = ga_from_bundle - ga_present
+                ga = ga_present | ga_will_appear
                 irr = {f for f in (plan_feats | user_feats | extras_set) if str(f).strip() in set(IRRELEVANT_FEATURES)}
                 # Precedence GA over Irrelevant
                 irr -= ga
@@ -723,6 +735,8 @@ def main():
                 bloat_costly = [b for b in bloat_features if str(b).strip().lower() in cost_set]
                 return {
                     'ga': sorted(ga),
+                    'ga_present': sorted(ga_present),
+                    'ga_will_appear': sorted(ga_will_appear),
                     'irrelevant': sorted(irr),
                     'plan_norm': plan_norm,
                     'user_norm': user_norm,
@@ -753,6 +767,8 @@ def main():
                         'bloat_costly': bloat_costly,
                         'bloat_costly_count': len(bloat_costly),
                         'gaFeatures': cls['ga'],
+                        'gaFeaturesPresent': cls['ga_present'],
+                        'gaFeaturesWillAppear': cls['ga_will_appear'],
                         'irrelevantFeatures': cls['irrelevant'],
                         'status': 'Locked (Human Approved)',
                     }
@@ -788,6 +804,8 @@ def main():
                     rec['bloat_costly'] = bloat_costly
                     rec['bloat_costly_count'] = len(bloat_costly)
                     rec['gaFeatures'] = cls['ga']
+                    rec['gaFeaturesPresent'] = cls['ga_present']
+                    rec['gaFeaturesWillAppear'] = cls['ga_will_appear']
                     rec['irrelevantFeatures'] = cls['irrelevant']
 
                 res_row = {
@@ -797,6 +815,8 @@ def main():
                     "Extras (Add-ons)": ", ".join(rec['extras']),
                     "Extras Count": rec.get('extras_count', 0),
                     "GA Features": ", ".join(rec.get('gaFeatures', [])),
+                    "GA Present": ", ".join(rec.get('gaFeaturesPresent', [])),
+                    "GA Will Appear": ", ".join(rec.get('gaFeaturesWillAppear', [])),
                     "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
                     "Bloat Features": ", ".join(rec.get('bloat_features', [])),
                     "Costly Bloat Count": rec.get('bloat_costly_count', 0),
@@ -986,7 +1006,19 @@ def main():
                 if selected_idx is not None:
                     cand = candidates[selected_idx]
                     st.caption("Preview of selected candidate")
-                    st.json(_preview_with_display_names(cand))
+                    # Enrich preview with GA split for better visibility
+                    try:
+                        plan_feats = set(logic_engine.plan_definitions.get(cand.get('plan'), set()))
+                        user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                        extras_set = set(cand.get('extras', []))
+                        cls = _classify_sets(plan_feats, user_feats, extras_set)
+                        enriched = dict(cand)
+                        enriched['gaFeatures'] = cls['ga']
+                        enriched['gaFeaturesPresent'] = cls['ga_present']
+                        enriched['gaFeaturesWillAppear'] = cls['ga_will_appear']
+                        st.json(_preview_with_display_names(enriched))
+                    except Exception:
+                        st.json(_preview_with_display_names(cand))
                     if st.button("Approve Selected Option & Lock"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
@@ -1034,6 +1066,8 @@ def main():
                                 'bloat_features': bloat_feats,
                                 'bloat_costly': parsed.get('bloat_costly', []),
                                 'gaFeatures': ga_feats,
+                                'gaFeaturesPresent': cls['ga_present'],
+                                'gaFeaturesWillAppear': cls['ga_will_appear'],
                                 'irrelevantFeatures': irr_feats,
                             }
                         )
