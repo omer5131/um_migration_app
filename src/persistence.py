@@ -31,9 +31,11 @@ class ApprovalsStore:
         if os.path.exists(self.path):
             try:
                 df = pd.read_csv(self.path)
-                # Backward compatibility: rename old 'Extras' to 'Add-ons needed'
-                if 'Add-ons needed' not in df.columns and 'Extras' in df.columns:
-                    df = df.rename(columns={'Extras': 'Add-ons needed'})
+                # Drop legacy extras columns unconditionally; use only 'Add-ons needed'
+                legacy_cols = ['Extras', 'add-ons to compatability', 'add-ons to compatibility']
+                for legacy_col in legacy_cols:
+                    if legacy_col in df.columns:
+                        df = df.drop(columns=[legacy_col])
                 return df
             except Exception:
                 return pd.DataFrame(
@@ -251,23 +253,16 @@ class ApprovalsStore:
                         return None
                 df_for_airtable['Account'] = df_for_airtable['Account'].apply(_clean_account)
 
-            # Normalize column names to match the "Recommendations & Agent" page
-            # We will stop using legacy names like "add-ons to compatibility" and "on the house".
-            column_mapping = {
-                # Legacy -> current
-                'add-ons to compatability': 'Add-ons needed',
-                'add-ons to compatibility': 'Add-ons needed',
-                'features on the house': 'Gained by plan (not currently in project)',
-                'on the house': 'Gained by plan (not currently in project)',
-                'Included but not used': 'Gained by plan (not currently in project)',
-                'Gained by plan (not in project)': 'Gained by plan (not currently in project)',
-                # Legacy CSV column sometimes used
-                'Extras': 'Add-ons needed',
-                # Normalize plan field casing to match Airtable schema: prefer 'Final Plan'
-                'Final plan': 'Final Plan',
-                'Recommended Plan': 'Final Plan',
-            }
-            df_for_airtable = df_for_airtable.rename(columns=column_mapping)
+            # Normalize column names: drop legacy extras columns and keep only 'Add-ons needed'
+            for legacy_col in ['Extras', 'add-ons to compatability', 'add-ons to compatibility']:
+                if legacy_col in df_for_airtable.columns:
+                    df_for_airtable.drop(columns=[legacy_col], inplace=True)
+            # Optional other legacy variants for 'Gained by plan' are left as-is unless present; we do not merge here
+            # Normalize plan field casing to match Airtable schema: prefer 'Final Plan'
+            if 'Final plan' in df_for_airtable.columns and 'Final Plan' not in df_for_airtable.columns:
+                df_for_airtable.rename(columns={'Final plan': 'Final Plan'}, inplace=True)
+            if 'Recommended Plan' in df_for_airtable.columns and 'Final Plan' not in df_for_airtable.columns:
+                df_for_airtable.rename(columns={'Recommended Plan': 'Final Plan'}, inplace=True)
 
             # Replace NaN values with None (JSON-compatible)
             df_for_airtable = df_for_airtable.replace({pd.NA: None, float('nan'): None})
@@ -289,124 +284,34 @@ class ApprovalsStore:
                     except Exception:
                         return None
                 df_for_airtable['Approved At'] = df_for_airtable['Approved At'].apply(_ts_to_iso)
+            # Final alignment with CLI cleaner: clean cells and trim whitespace/newlines on all string cells
+            def _clean_cell(v):
+                import pandas as _pd
+                if isinstance(v, getattr(_pd, 'Series', ())) or str(type(v)).endswith(".Series'>"):
+                    try:
+                        return _clean_cell(v.iloc[0])
+                    except Exception:
+                        return None
+                if isinstance(v, dict):
+                    try:
+                        return json.dumps(v, ensure_ascii=False)
+                    except Exception:
+                        return str(v)
+                if isinstance(v, list):
+                    return ', '.join(map(str, v))
+                if isinstance(v, str):
+                    return v.replace('\n', '').replace('\r', '').strip()
+                try:
+                    if pd.isna(v):
+                        return None
+                except Exception:
+                    pass
+                return v
 
-            # Convert list columns to comma-separated strings for Airtable text fields
-            list_like_columns = [
-                'bloat_costly',
-                'irrelevantFeatures',
-            ]
-            for col in list_like_columns:
-                if col in df_for_airtable.columns:
-                    def _list_to_text(x):
-                        """Convert lists/JSON to comma-separated text for Airtable without ambiguous truth tests."""
-                        if x is None:
-                            return None
-                        if isinstance(x, str):
-                            xs = x.strip()
-                            if not xs:
-                                return None
-                            # Try JSON parse for list-like strings
-                            try:
-                                val = json.loads(xs)
-                                if isinstance(val, list):
-                                    return ', '.join(str(item) for item in val) if len(val) > 0 else None
-                            except Exception:
-                                pass
-                            return xs
-                        if isinstance(x, list):
-                            return ', '.join(str(item) for item in x) if len(x) > 0 else None
-                        # Dict -> JSON string
-                        if isinstance(x, dict):
-                            try:
-                                return json.dumps(x, ensure_ascii=False)
-                            except Exception:
-                                return str(x)
-                        # Numeric/bool scalars -> str; arrays/Series -> str safely
-                        try:
-                            return str(x)
-                        except Exception:
-                            return None
-                    df_for_airtable[col] = df_for_airtable[col].apply(_list_to_text)
-
-            # Convert list-like columns to comma-separated strings for Airtable text fields
-            list_like_columns = [
-                'bloat_costly',
-                'irrelevantFeatures',
-                'Add-ons needed',
-                'Gained by plan (not currently in project)',
-                'Applied Add-on Plans',
-            ]
-            for col in list_like_columns:
-                if col in df_for_airtable.columns:
-                    def _list_to_text(x):
-                        if x is None:
-                            return None
-                        if isinstance(x, str):
-                            xs = x.strip()
-                            if not xs:
-                                return None
-                            # Heuristic: clean up pandas Series repr like "0  None\n1  [\"a\",...]\nName: ..., dtype: object"
-                            if ('Name:' in xs and 'dtype:' in xs) or ('\n' in xs and any(ch.isdigit() for ch in xs.split('\n',1)[0])):
-                                try:
-                                    start = xs.find('[')
-                                    end = xs.rfind(']')
-                                    if start != -1 and end != -1 and end > start:
-                                        arr_str = xs[start:end+1]
-                                        import json as _json
-                                        try:
-                                            # Try strict JSON first
-                                            arr = _json.loads(arr_str)
-                                        except Exception:
-                                            # Replace single quotes to approximate JSON
-                                            arr = _json.loads(arr_str.replace("'", '"'))
-                                        if isinstance(arr, list):
-                                            return ', '.join(str(item) for item in arr) if len(arr) > 0 else None
-                                except Exception:
-                                    pass
-                                # Fallback: extract RHS tokens per line
-                                try:
-                                    import re as _re, json as _json
-                                    vals = []
-                                    for ln in xs.splitlines():
-                                        ln = ln.strip()
-                                        if not ln or ln.startswith('Name:') or 'dtype:' in ln:
-                                            continue
-                                        m = _re.match(r'^(\d+)\s+(.*)$', ln)
-                                        rhs = m.group(2) if m else ln
-                                        rhs = rhs.strip()
-                                        if rhs in ('None', 'nan', 'NaN'):
-                                            continue
-                                        if rhs.startswith('[') and rhs.endswith(']'):
-                                            try:
-                                                arr = _json.loads(rhs)
-                                            except Exception:
-                                                arr = _json.loads(rhs.replace("'", '"'))
-                                            if isinstance(arr, list):
-                                                vals.extend([str(it) for it in arr])
-                                                continue
-                                        vals.append(rhs.strip('"'))
-                                    return ', '.join(vals) if vals else None
-                                except Exception:
-                                    pass
-                            try:
-                                val = json.loads(xs)
-                                if isinstance(val, list):
-                                    return ', '.join(str(item) for item in val) if len(val) > 0 else None
-                            except Exception:
-                                pass
-                            return xs
-                        if isinstance(x, list):
-                            return ', '.join(str(item) for item in x) if len(x) > 0 else None
-                        if isinstance(x, dict):
-                            try:
-                                return json.dumps(x, ensure_ascii=False)
-                            except Exception:
-                                return str(x)
-                        try:
-                            return str(x)
-                        except Exception:
-                            return None
-                    df_for_airtable[col] = df_for_airtable[col].apply(_list_to_text)
+            try:
+                df_for_airtable = df_for_airtable.applymap(_clean_cell)
+            except Exception:
+                pass
 
             # Basic known fields commonly present; we will actually try to sync all columns,
             # but keep this for context and potential future filtering if needed.
@@ -453,7 +358,7 @@ class ApprovalsStore:
             # Sync to Airtable (attempt with current fields; on schema error, retry without unknowns)
             cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
             try:
-                created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account')
+                created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account', typecast=False)
             except Exception as e:
                 # On failure, attempt to create all missing fields, then retry full sync
                 try:
@@ -474,7 +379,7 @@ class ApprovalsStore:
                     except Exception:
                         pass
                     # Retry full set; if still fails, propagate detailed error
-                    created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account')
+                    created, updated = upsert_dataframe(cfg, df_for_airtable, key_field='Account', typecast=False)
                 except Exception:
                     # As a last resort, propagate the original error to surface schema issues
                     raise

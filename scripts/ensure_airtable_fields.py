@@ -7,7 +7,7 @@ from typing import List
 # Reuse Airtable helpers from the app
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from src.airtable import AirtableConfig, ensure_field_exists, fetch_records
+from src.airtable import AirtableConfig, ensure_field_exists, ensure_field_type, fetch_records
 from src.config import AIRTABLE as AT_CFG
 from src.utils.airtable_client import get_airtable_cfg
 
@@ -50,10 +50,20 @@ def main() -> int:
 
     created_or_exists = []
     for fname in desired_fields:
-        ok = ensure_field_exists(cfg, fname, field_type="multilineText")
+        ok = ensure_field_type(cfg, fname, desired_type="multilineText")
+        # Fall back to existence check if type conversion is not permitted
+        if not ok:
+            ok = ensure_field_exists(cfg, fname, field_type="multilineText")
         created_or_exists.append((fname, ok))
 
-    # Test access: fetch a small sample of records
+    # Print summary of field ensure/convert operations first
+    succeeded = [f for f, ok in created_or_exists if ok]
+    failed = [f for f, ok in created_or_exists if not ok]
+    print(f"Fields set to multilineText (or already correct): {', '.join(succeeded) if succeeded else 'none'}")
+    if failed:
+        print(f"Fields not ensured/converted: {', '.join(failed)}")
+
+    # Test access: fetch a small sample of records (optional)
     try:
         records = fetch_records(cfg)
         count = len(records)
@@ -61,13 +71,6 @@ def main() -> int:
     except Exception as e:
         print(f"ERROR: Could not fetch records: {e}", file=sys.stderr)
         return 3
-
-    # Print summary of field ensure operations
-    succeeded = [f for f, ok in created_or_exists if ok]
-    failed = [f for f, ok in created_or_exists if not ok]
-    print(f"Fields ensured: {', '.join(succeeded) if succeeded else 'none'}")
-    if failed:
-        print(f"Fields not ensured (create failed or not allowed): {', '.join(failed)}")
 
     return 0
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 import time
 from dataclasses import dataclass
@@ -26,13 +25,11 @@ class AirtableAuth:
 class UpsertOptions:
     key_field: str
     table: str
-    batch_size: int = 10  # Airtable limit
-    typecast: bool = True
-    max_retries: int = 4
-    retry_backoff: float = 1.5  # seconds base for exponential backoff
-    skip_nulls: bool = True  # do not send null/NaN/empty fields
-    filter_unknown_fields: bool = True  # limit to existing Airtable fields via metadata
-    field_aliases: Optional[Dict[str, str]] = None  # map CSV column -> Airtable field name
+    batch_size: int = 10  # Airtable limit is 10
+    typecast: bool = False  # write as-is by default
+    include_nulls: bool = False  # if True, send blanks for empty values to overwrite
+    max_retries: int = 3
+    retry_backoff: float = 1.5  # seconds base
 
 
 def _require_requests() -> None:
@@ -41,152 +38,39 @@ def _require_requests() -> None:
 
 
 def _quote_segment(s: str) -> str:
-    # Minimal quoting to support spaces in table names
     return s.replace(" ", "%20")
 
 
-def _is_null(v: Any) -> bool:
-    if v is None:
-        return True
-    try:
-        if isinstance(v, float) and math.isnan(v):
-            return True
-    except Exception:
-        pass
-    try:
-        # pandas NA-like
-        if pd.isna(v):
-            return True
-    except Exception:
-        pass
-    if isinstance(v, str) and v.strip() == "":
-        return True
-    return False
-
-
-def _normalize_value(value: Any, field_type: Optional[str] = None, *, skip_nulls: bool = True) -> Any:
-    # Null handling
-    if skip_nulls and _is_null(value):
-        return None
-    # Pandas Series -> list or joined string
-    try:
-        if isinstance(value, pd.Series):
-            vals = [x for x in value.dropna().tolist() if not _is_null(x)]
-            if field_type and field_type.lower() == "multipleselects":
-                return [str(x) for x in vals]
-            return ", ".join([str(x) for x in vals]) if vals else None
-    except Exception:
-        pass
-    return value
-
-
-def _normalize_fields(row: Dict[str, Any], skip_nulls: bool, known_fields: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
-    out: Dict[str, Any] = {}
-    for k, v in row.items():
-        ftype = (known_fields or {}).get(k)
-        nv = _normalize_value(v, ftype, skip_nulls=skip_nulls)
-        if skip_nulls and nv is None:
-            continue
-        out[k] = nv
-    return out
-
-
-def _clean_item(s: str) -> str:
-    s = s.strip()
-    # Trim surrounding quotes
-    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
-        s = s[1:-1].strip()
-    return s
-
-
-def _coerce_value_for_type(value: Any, ftype: str) -> Any:
-    """Coerce a CSV value to Airtable field type when possible using simple rules.
-
-    - date: ISO date string (YYYY-MM-DD)
-    - dateTime: ISO datetime string with Z
-    - number / percent / currency: numeric
-    - checkbox: boolean
-    - multipleSelects: list[str] (split on commas if given a string)
-    """
-    try:
-        t = (ftype or "").lower()
-        if t in ("singlelinetext", "multilinetext"):
-            if _is_null(value):
-                return None
-            return str(value)
-        if t in ("date",):
-            ts = pd.to_datetime(value, utc=True, errors="coerce")
-            if ts is not None and not pd.isna(ts):
-                return ts.date().isoformat()
-            return value
-        if t in ("datetime", "dateTime".lower()):
-            ts = pd.to_datetime(value, utc=True, errors="coerce")
-            if ts is not None and not pd.isna(ts):
-                return ts.isoformat().replace("+00:00", "Z")
-            return value
-        if t in ("number", "percent", "currency"):
-            if isinstance(value, str) and value.strip() == "":
-                return None
-            try:
-                return float(value)
-            except Exception:
-                return value
-        if t == "checkbox":
-            if isinstance(value, bool):
-                return value
-            s = str(value).strip().lower()
-            return s in ("1", "true", "yes", "y")
-        if t == "multipleselects":
-            if isinstance(value, list):
-                cleaned = [_clean_item(str(x)) for x in value if not _is_null(x)]
-                # de-duplicate while preserving order
-                dedup = list(dict.fromkeys([c for c in cleaned if c]))
-                return dedup
-            if isinstance(value, str):
-                # accept JSON-like list or comma-separated
-                if value.strip().startswith("[") and value.strip().endswith("]"):
-                    try:
-                        import json as _json
-                        arr = _json.loads(value)
-                        if isinstance(arr, list):
-                            cleaned = [_clean_item(str(x)) for x in arr if not _is_null(x)]
-                            return list(dict.fromkeys([c for c in cleaned if c]))
-                    except Exception:
-                        pass
-                # fallback split by comma
-                items = [_clean_item(s) for s in value.split(",")]
-                return list(dict.fromkeys([s for s in items if s]))
-        return value
-    except Exception:
-        return value
+def load_csv(csv_path: str, *, limit: Optional[int] = None) -> pd.DataFrame:
+    """Load a CSV as raw text (no NA parsing)."""
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV not found: {csv_path}")
+    df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+    if limit is not None and limit > 0:
+        df = df.head(limit)
+    return df
 
 
 def _http_with_retry(method: str, url: str, headers: Dict[str, str], json_payload: Dict[str, Any], *,
                      max_retries: int, backoff: float) -> Any:
-    """Perform HTTP with basic retry on 429/5xx."""
-    assert requests is not None  # for type checkers
+    assert requests is not None
     attempt = 0
     last_exc: Optional[Exception] = None
     while attempt <= max_retries:
         try:
             resp = requests.request(method, url, headers=headers, json=json_payload, timeout=60)
-            # Provide richer context on failure, and retry on 429/5xx
             if resp.status_code >= 400:
-                # Retry on rate limit or server errors
+                # Retry on 429/5xx
                 if resp.status_code in (429,) or 500 <= resp.status_code < 600:
-                    raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:1000]}")
-                # Non-retryable (4xx) -> raise with response body
-                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:1000]}")
-            # Success
+                    raise RuntimeError(f"HTTP {resp.status_code}: {getattr(resp, 'text', '')[:1000]}")
+                raise RuntimeError(f"HTTP {resp.status_code}: {getattr(resp, 'text', '')[:1000]}")
             return resp.json()
         except Exception as e:  # pragma: no cover - network branch
             last_exc = e
             if attempt == max_retries:
                 break
-            sleep_for = (backoff ** attempt)
-            time.sleep(sleep_for)
+            time.sleep(backoff ** attempt)
             attempt += 1
-    # Exhausted
     raise RuntimeError(f"Airtable request failed after {max_retries+1} attempts: {last_exc}")
 
 
@@ -197,7 +81,6 @@ def fetch_existing_map(auth: AirtableAuth, table: str, key_field: str) -> Dict[s
     url = f"https://api.airtable.com/v0/{auth.base_id}/{_quote_segment(table)}"
     params: Dict[str, Any] = {"pageSize": 100}
     out: Dict[str, Dict[str, Any]] = {}
-
     while True:
         resp = requests.get(url, headers=headers, params=params, timeout=60)  # type: ignore[attr-defined]
         resp.raise_for_status()
@@ -214,32 +97,25 @@ def fetch_existing_map(auth: AirtableAuth, table: str, key_field: str) -> Dict[s
     return out
 
 
-def get_table_fields(auth: AirtableAuth, table: str) -> Dict[str, str]:
-    """Return mapping field_name -> field_type for a table using the Metadata API.
-
-    If metadata access is not allowed, returns an empty dict.
-    """
-    _require_requests()
-    headers = {
-        "Authorization": f"Bearer {auth.api_key}",
-        "Content-Type": "application/json",
-    }
-    meta_url = f"https://api.airtable.com/v0/meta/bases/{auth.base_id}/tables"
-    try:
-        r = requests.get(meta_url, headers=headers, timeout=60)  # type: ignore[attr-defined]
-        r.raise_for_status()
-        payload = r.json() or {}
-        for t in payload.get("tables", []):
-            if str(t.get("id")) == table or str(t.get("name")) == table:
-                fields = t.get("fields") or []
-                return {str(f.get("name")): str(f.get("type")) for f in fields}
-        return {}
-    except Exception:  # pragma: no cover - network branch
-        return {}
+def _normalize_row_raw(row: Dict[str, Any], include_nulls: bool) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for k, v in row.items():
+        # All values should be strings (due to dtype=str). Ensure str for safety.
+        if v is None:
+            if include_nulls:
+                out[k] = ""
+            continue
+        sv = str(v)
+        if sv == "":
+            if include_nulls:
+                out[k] = ""
+            continue
+        out[k] = sv
+    return out
 
 
 def upsert_dataframe(df: pd.DataFrame, auth: AirtableAuth, opts: UpsertOptions, *, dry_run: bool = False) -> Tuple[int, int]:
-    """Upsert a DataFrame into Airtable by key column.
+    """Upsert a DataFrame into Airtable by key column, writing values as-is.
 
     Returns (created, updated) counts.
     """
@@ -247,75 +123,42 @@ def upsert_dataframe(df: pd.DataFrame, auth: AirtableAuth, opts: UpsertOptions, 
     if df is None or df.empty:
         return 0, 0
 
-    # Build existing map
     existing = fetch_existing_map(auth, opts.table, opts.key_field)
 
     to_create: List[Dict[str, Any]] = []
     to_update: List[Dict[str, Any]] = []
 
-    # Prepare entries
-    known_fields = get_table_fields(auth, opts.table) if opts.filter_unknown_fields else {}
-    # Apply header aliases if provided
-    if opts.field_aliases:
-        df = df.rename(columns=opts.field_aliases)
-    records = df.to_dict(orient="records")
-    for row in records:
+    for row in df.to_dict(orient="records"):
         key_val = str(row.get(opts.key_field, "")).strip()
         if not key_val:
             continue
-        fields = _normalize_fields(row, skip_nulls=opts.skip_nulls, known_fields=known_fields)
-        if known_fields:
-            # Filter to fields that exist in Airtable to avoid 422 errors from unknown columns
-            filtered = {}
-            for k, v in fields.items():
-                if k not in known_fields:
-                    continue
-                filtered[k] = _coerce_value_for_type(v, known_fields[k])
-            fields = filtered
+        fields = _normalize_row_raw(row, include_nulls=opts.include_nulls)
         if key_val in existing:
-            rec_id = existing[key_val].get("id")
-            if not rec_id:
-                continue
-            to_update.append({"id": rec_id, "fields": fields})
+            rid = existing[key_val].get("id")
+            if rid:
+                to_update.append({"id": rid, "fields": fields})
         else:
             to_create.append({"fields": fields})
 
-    # Short-circuit for dry-run
     if dry_run:
         return len(to_create), len(to_update)
 
     url = f"https://api.airtable.com/v0/{auth.base_id}/{_quote_segment(opts.table)}"
-    headers = {
-        "Authorization": f"Bearer {auth.api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {auth.api_key}", "Content-Type": "application/json"}
 
     created = 0
-    for i in range(0, len(to_create), opts.batch_size):
+    for i in range(0, len(to_create), max(1, min(10, opts.batch_size))):
         batch = to_create[i : i + opts.batch_size]
-        payload = {"records": batch, "typecast": opts.typecast}
+        payload = {"records": batch, "typecast": bool(opts.typecast)}
         resp_json = _http_with_retry("POST", url, headers, payload, max_retries=opts.max_retries, backoff=opts.retry_backoff)
-        created += len(resp_json.get("records", []))
+        created += len((resp_json or {}).get("records", []))
 
     updated = 0
-    for i in range(0, len(to_update), opts.batch_size):
+    for i in range(0, len(to_update), max(1, min(10, opts.batch_size))):
         batch = to_update[i : i + opts.batch_size]
-        payload = {"records": batch, "typecast": opts.typecast}
+        payload = {"records": batch, "typecast": bool(opts.typecast)}
         resp_json = _http_with_retry("PATCH", url, headers, payload, max_retries=opts.max_retries, backoff=opts.retry_backoff)
-        updated += len(resp_json.get("records", []))
+        updated += len((resp_json or {}).get("records", []))
 
     return created, updated
 
-
-def load_csv(csv_path: str, *, limit: Optional[int] = None) -> pd.DataFrame:
-    """Load a CSV file into a DataFrame with basic NA handling.
-
-    - Preserves column names as-is.
-    - Optionally limits rows for testing.
-    """
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(f"CSV not found: {csv_path}")
-    df = pd.read_csv(csv_path)
-    if limit is not None and limit > 0:
-        df = df.head(limit)
-    return df

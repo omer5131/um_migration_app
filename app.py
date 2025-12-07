@@ -11,8 +11,8 @@ from src.data_loader import (
 from src.logic import MigrationLogic
 from src.utils import parse_feature_list
 from src.config import EXTRA_COST_BLOAT_WEIGHT
-from src.agent import ReviewAgent
-from src.decision_agent import DecisionAgent
+from src.agent.review import ReviewAgent
+from src.agent.decision import DecisionAgent
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
 from src.persistence import ApprovalsStore
 from src.config import AIRTABLE as AT_CFG
@@ -126,11 +126,9 @@ def main():
     else:
         openai_key = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
     approved_by = st.sidebar.text_input("Your Name (for approvals)")
-    use_ai_bulk = st.sidebar.checkbox("Use AI for recommendations (beta)", value=False)
-    paid_bloat_penalty = st.sidebar.slider(
-        "Paid bloat penalty (weight)", min_value=0, max_value=15, value=EXTRA_COST_BLOAT_WEIGHT, step=1,
-        help="Higher weight penalizes plans that include paid features the user doesn't have."
-    )
+    # Removed: 'Use AI for recommendations' toggle; recommendations run without AI
+    # Paid bloat penalty UI removed; use configured default
+    paid_bloat_penalty = EXTRA_COST_BLOAT_WEIGHT
 
     store = ApprovalsStore()
 
@@ -176,7 +174,6 @@ def main():
             st.markdown(
                 "- Open 'Recommendations & Agent'.\n"
                 "- Adjust filters (CSM, Sub Type, Segment).\n"
-                "- Tune 'Paid bloat penalty' if needed.\n"
                 "- Click 'Run Migration Logic' to generate recommendations and metrics."
             )
         with st.expander("3) Review and choose", expanded=True):
@@ -605,7 +602,7 @@ def main():
 
     elif tab == "Recommendations & Agent":
         # Run logic and metrics
-        render_recommendations_tab(store, use_ai_bulk, openai_key, paid_bloat_penalty)
+        render_recommendations_tab(store, openai_key, paid_bloat_penalty)
         # Render detailed review/candidate/approval panel
         from src.ui.review import render as render_review_panel
         render_review_panel(store, openai_key, approved_by, paid_bloat_penalty)

@@ -149,6 +149,38 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
     if df is None or df.empty:
         return 0, 0
 
+    # Align behavior with CSV sync script: clean cells and trim whitespace
+    def _clean_cell(val: Any) -> Any:
+        try:
+            import pandas as _pd  # local alias
+            if isinstance(val, getattr(_pd, 'Series', ())) or str(type(val)).endswith(".Series'>"):
+                try:
+                    return _clean_cell(val.iloc[0])
+                except Exception:
+                    return None
+        except Exception:
+            pass
+        if isinstance(val, dict):
+            try:
+                return json.dumps(val, ensure_ascii=False)
+            except Exception:
+                return str(val)
+        if isinstance(val, list):
+            return ", ".join(map(str, val))
+        if isinstance(val, str):
+            return val.strip()
+        try:
+            if pd.isna(val):
+                return None
+        except Exception:
+            pass
+        return val
+
+    try:
+        df = df.applymap(_clean_cell)
+    except Exception:
+        pass
+
     existing = _fetch_all_by_key(cfg, key_field)
 
     to_create: List[Dict[str, Any]] = []
@@ -161,6 +193,11 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
         'Approved By',
         'Approved At',
         'Comment',
+    }
+    # Always update these fields regardless of timestamp guards
+    ALWAYS_UPDATE_FIELDS = {
+        'Add-ons needed',
+        'Gained by plan (not currently in project)',
     }
 
     def _is_empty(v: Any) -> bool:
@@ -242,7 +279,9 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
             for k, v in fields.items():
                 if _is_empty(v):
                     continue
-                if k in CORE_FIELDS:
+                if k in ALWAYS_UPDATE_FIELDS:
+                    merged[k] = v
+                elif k in CORE_FIELDS:
                     # Only update core fields if our timestamp is newer/equal, else skip to avoid overriding
                     if ex_ts is not None and our_ts is not None and our_ts < ex_ts:
                         continue
@@ -354,6 +393,78 @@ def ensure_field_exists(cfg: AirtableConfig, desired_field_name: str, field_type
         # If metadata API not available or any error occurs, just return False
         return False
 
+
+def ensure_field_type(cfg: AirtableConfig, field_name: str, desired_type: str = "multilineText") -> bool:
+    """Ensure a field exists and has the desired type, attempting to convert if needed.
+
+    Uses the Airtable Metadata API. Returns True on success; False if not allowed or failed.
+    """
+    _assert_requests()
+    try:
+        headers = {
+            "Authorization": f"Bearer {cfg.api_key}",
+            "Content-Type": "application/json",
+        }
+        # Locate table and existing field
+        meta_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables"
+        r = requests.get(meta_url, headers=headers, timeout=30)
+        r.raise_for_status()
+        tables = (r.json() or {}).get("tables", [])
+        target = None
+        for t in tables:
+            if str(t.get("id")) == str(cfg.table_id_or_name) or str(t.get("name")) == str(cfg.table_id_or_name):
+                target = t
+                break
+        if not target:
+            return False
+
+        fields = target.get("fields") or []
+        existing = None
+        for f in fields:
+            if str(f.get("name")) == field_name:
+                existing = f
+                break
+
+        table_id = target.get("id")
+        if not table_id:
+            return False
+
+        patch_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables/{table_id}"
+
+        if existing is None:
+            # Create new field with the desired type
+            payload = {"fields": [{"name": field_name, "type": desired_type}]}
+            rp = requests.patch(patch_url, headers=headers, json=payload, timeout=30)
+            try:
+                rp.raise_for_status()
+                return True
+            except Exception:
+                try:
+                    post_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables/{table_id}/fields"
+                    rp2 = requests.post(post_url, headers=headers, json={"name": field_name, "type": desired_type}, timeout=30)
+                    rp2.raise_for_status()
+                    return True
+                except Exception:
+                    return False
+
+        # If exists and already the desired type, done
+        current_type = str(existing.get("type", ""))
+        if current_type == desired_type:
+            return True
+
+        # Attempt to convert type via PATCH using field id
+        field_id = existing.get("id")
+        if not field_id:
+            return False
+        payload = {"fields": [{"id": field_id, "type": desired_type}]}
+        rp = requests.patch(patch_url, headers=headers, json=payload, timeout=30)
+        try:
+            rp.raise_for_status()
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
 
 def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = "Account", typecast: bool = True) -> str:
     """Upsert a single record by key_field. Returns record ID."""

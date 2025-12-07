@@ -4,15 +4,13 @@ import streamlit as st
 import pandas as pd
 
 from src.logic import MigrationLogic
-from src.agent import ReviewAgent
-from src.decision_agent import DecisionAgent
 from src.utils import parse_feature_list
 from src.plan_definitions import get_flat_plan_json, get_active_plan_json
 from src.data_loader import load_all_data
 from src.ui.helpers import classify_sets, enrich_bloat_with_ga, preview_with_display_names, make_details_payload, autosave_exports, sync_approval_to_airtable
 
 
-def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
+def render(store, openai_key: str, paid_bloat_penalty: int):
     data = st.session_state.get("data") or load_all_data()
     if not data:
         st.warning("Please load data first in 'Data Sources'.")
@@ -39,9 +37,7 @@ def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
         data['plan_json'] = data.get('plan_json') or get_flat_plan_json()
 
     logic_engine = MigrationLogic(None, data.get('plan_json'), cost_bloat_weight=paid_bloat_penalty)
-    agent = ReviewAgent(openai_key)
-    decision_agent = DecisionAgent(openai_key)
-    st.session_state.setdefault('ai_decisions', {})
+    # AI toggle and bulk decision removed; recommendations run purely by logic_engine
 
     st.info(f"Data source: {data.get('_source', 'unknown')}")
 
@@ -122,21 +118,6 @@ def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
                 }
             else:
                 rec = logic_engine.recommend(row)
-                if use_ai_bulk and openai_key:
-                    ai_dec = decision_agent.make_decision(
-                        account_name=account_name,
-                        subtype=row.get('Sub Type', row.get('Subtype', 'Unknown')),
-                        user_features=row.get('featureNames', []),
-                        logic_result=rec,
-                    )
-                    if isinstance(ai_dec, dict) and isinstance(ai_dec.get('parsed'), dict):
-                        parsed = ai_dec['parsed']
-                        ai_plan = parsed.get('plan') or rec.get('recommended_plan')
-                        ai_extras = [str(x).strip() for x in parsed.get('extras', rec.get('extras', []))]
-                        rec['recommended_plan'] = ai_plan
-                        rec['extras'] = ai_extras
-                        rec['extras_count'] = len(ai_extras)
-                        st.session_state['ai_decisions'][account_name] = ai_dec
 
                 plan_name = rec.get('recommended_plan')
                 plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))

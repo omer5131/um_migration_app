@@ -1,6 +1,5 @@
 Account,Sub Type,Final Plan,Add-ons needed,Approved By,Approved At,plan,add-ons to compatability,features on the house,bloat_costly,gaFeatures,GA present in account,GA will appear with plan,irrelevantFeatures,Gained by plan (not currently in project),Comment
-Heidmar Inc,Shipowner,Shipowners Advanced,"hideHistoricalRiskIndicators, hideMapModule, hideMapTimelineOnVesselProfile, hideNotificationsCenter, nasAccidentsActivity, newAdvancedSearch, shadowFleetVOIs, softAoi, wetCargoData",Omer,1764168981,,,,,,,,,,
 "LITASCO S.A.
-",Commodity Trader,Commodity Trader Core,"hideMapTimelineOnVesselProfile, nasAddVesselsToVoi, riskRanking",Omer,1765102941,Commodity Trader Core,,,[],,,,,"[""hideBorderSecurityRisk"", ""hideMapModule"", ""hideSafetyRisk"", ""sendHeartbeat"", ""weatherLayer""]",omer check 20
-"Generali France
-",Insurance,Insurer Advanced,"hideHistoricalRiskIndicators, hideMapTimelineOnVesselProfile, nasAddVesselsToVoi, Companies Add-on, MAI Expert, UBO, Wet Cargo",Omer,1765108586,Insurer Advanced,,,[],,,,,"[""Companies Add-on"", ""MAI Expert"", ""UBO"", ""Wet Cargo"", ""hideBorderSecurityRisk"", ""hideRuleEngine"", ""hideSafetyRisk"", ""userAlreadyLoggedInWarning""]",Omer Check 99
+",Commodity Trader,Commodity Trader Core,"riskRanking, Companies Add-on, UBO",Omer,1765120173,Commodity Trader Core,,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideBorderSecurityRisk"", ""hideMapModule"", ""hideSafetyRisk""]}",Omer check
+"Arte Bunkering
+",Bunkering,Bunkering Core,"nasExportMediumCsv, newAdvancedSearch, organizationDefinedRisk, sendHeartbeat, Companies Add-on, MAI Expert, UBO, Wet Cargo, STS Classification",Omer,1765120257,Bunkering Core,,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideMapModule""]}",Omer Check

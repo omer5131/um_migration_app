@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from src.logic import MigrationLogic
-from src.decision_agent import DecisionAgent
+from src.agent.decision import DecisionAgent
 from src.utils import parse_feature_list
 from src.plan_definitions import get_active_plan_json, get_flat_plan_json
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
