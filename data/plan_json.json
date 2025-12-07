@@ -156,7 +156,7 @@
       "weatherLayer",
       "liveChat",
       "complianceLabel",
-      
+      "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
@@ -175,7 +175,7 @@
       "weatherLayer",
       "liveChat",
       "complianceLabel",
-      
+      "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
@@ -195,7 +195,7 @@
       "complianceMode",
       "liveChat",
       "complianceLabel",
-      
+      "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
       "userAlreadyLoggedInWarning",
