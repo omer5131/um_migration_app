@@ -240,7 +240,14 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                 extras_set = set(cand.get('extras', []))
                 cls = _classify_sets(plan_feats, user_feats, extras_set)
                 enriched = dict(cand)
-                enriched['bloat_features'] = _enrich_bloat_with_ga(cand.get('bloat_features', []), cls.get('ga_will_appear', []))
+                # Include required pieces for breakdown
+                enriched['bloat_features'] = cls.get('bloat_features', cand.get('bloat_features', []))
+                enriched['ga_will_appear'] = cls.get('ga_will_appear', [])
+                try:
+                    plan_only_gain = sorted(list((cls.get('plan_norm', set()) or set()) - (cls.get('user_norm', set()) or set())))
+                except Exception:
+                    plan_only_gain = []
+                enriched['plan_only_gain'] = plan_only_gain
                 st.json(_preview_with_display_names(enriched))
             except Exception:
                 st.json(_preview_with_display_names(cand))
@@ -352,12 +359,18 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
             bloat_feats = cls['bloat_features']
             irr_feats = cls['irrelevant']
             st.caption(parsed.get('reasoning', ''))
+            try:
+                plan_only_gain = sorted(list((cls.get('plan_norm', set()) or set()) - (cls.get('user_norm', set()) or set())))
+            except Exception:
+                plan_only_gain = []
             st.json(
                 _preview_with_display_names(
                     {
                         'plan': plan_name,
                         'extras': sorted(list(cls['extras_norm'])),
-                        'bloat_features': _enrich_bloat_with_ga(bloat_feats, cls.get('ga_will_appear', [])),
+                        'bloat_features': bloat_feats,
+                        'ga_will_appear': cls.get('ga_will_appear', []),
+                        'plan_only_gain': plan_only_gain,
                         'bloat_costly': parsed.get('bloat_costly', []),
                         'irrelevantFeatures': irr_feats,
                     }

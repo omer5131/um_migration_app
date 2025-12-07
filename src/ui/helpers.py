@@ -22,7 +22,7 @@ _DISPLAY_KEY_MAP = {
 
 
 def preview_with_display_names(data: Dict) -> Dict:
-    """Preview JSON merging Applied Add-on Plans into Add-ons needed."""
+    """Preview JSON with merged add-ons and GA vs Final breakdown."""
     ordered = reorder_features_json(data)
 
     def _norm_list(val):
@@ -45,7 +45,32 @@ def preview_with_display_names(data: Dict) -> Dict:
     out: Dict = {}
     out[_DISPLAY_KEY_MAP["plan"]] = plan_val
     out[_DISPLAY_KEY_MAP["extras"]] = merged_extras
-    out[_DISPLAY_KEY_MAP["bloat_features"]] = ordered.get("bloat_features", data.get("bloat_features", []))
+
+    # Build GA vs Final breakdown for "Gained by plan"
+    ga_list = ordered.get("ga_will_appear", data.get("ga_will_appear", []))
+    bloat_list = ordered.get("bloat_features", data.get("bloat_features", []))
+    try:
+        ga_clean = sorted([str(x).strip() for x in (ga_list or []) if str(x).strip()])
+    except Exception:
+        ga_clean = ga_list or []
+    try:
+        bloat_clean = sorted([str(x).strip() for x in (bloat_list or []) if str(x).strip()])
+    except Exception:
+        bloat_clean = bloat_list or []
+    # Prefer plan-only gain if present; else fallback to bloat list (non-GA gains)
+    plan_only = ordered.get("plan_only_gain", data.get("plan_only_gain", None))
+    if plan_only is not None:
+        try:
+            final_clean = sorted([str(x).strip() for x in (plan_only or []) if str(x).strip()])
+        except Exception:
+            final_clean = plan_only or []
+    else:
+        final_clean = bloat_clean
+    out[_DISPLAY_KEY_MAP["bloat_features"]] = {
+        "Granted by GA": ga_clean,
+        "Final plan": final_clean,
+    }
+
     out[_DISPLAY_KEY_MAP["bloat_costly"]] = ordered.get("bloat_costly", data.get("bloat_costly", []))
     # Some builds map irrelevantFeatures to same display name; keep if present
     if _DISPLAY_KEY_MAP.get("irrelevantFeatures"):
@@ -101,12 +126,24 @@ def make_details_payload(plan_name: str, cls: dict, extras_list: List[str], comm
     else:
         extras_iter = extras_list or []
 
+    ga_will_appear = list(cls.get('ga_will_appear', []))
+    try:
+        plan_norm = set(cls.get('plan_norm', set()))
+        user_norm = set(cls.get('user_norm', set()))
+        plan_only_gain = sorted([str(x).strip() for x in (plan_norm - user_norm) if str(x).strip()])
+    except Exception:
+        plan_only_gain = []
+
+    # Provide a breakdown for Gained by plan: Granted by GA vs Final plan (plan-only gains)
+    gained_breakdown = {
+        'Granted by GA': sorted([str(x).strip() for x in ga_will_appear if str(x).strip()]),
+        'Final plan': plan_only_gain,
+    }
+
     payload = {
         'plan': plan_name,
         'Add-ons needed': [str(x).strip() for x in extras_iter if str(x).strip()],
-        'Gained by plan (not currently in project)': enrich_bloat_with_ga(
-            cls.get('bloat_features', []), cls.get('ga_will_appear', [])
-        ),
+        'Gained by plan (not currently in project)': gained_breakdown,
         'bloat_costly': list(cls.get('bloat_costly', [])),
     }
     if comment is not None and str(comment).strip():
