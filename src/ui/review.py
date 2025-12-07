@@ -8,7 +8,6 @@ from src.decision_agent import DecisionAgent
 from src.utils import parse_feature_list
 from src.plan_definitions import get_active_plan_json, get_flat_plan_json
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
-from src.sheets import write_dataframe
 from src.ui.helpers import (
     classify_sets as _classify_sets,
     enrich_bloat_with_ga as _enrich_bloat_with_ga,
@@ -85,40 +84,7 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-    # Optional: Sync approvals and updated mapping back to Google Sheets
-    gs = st.session_state.get('gsheets')
-    if gs and gs.get('enable_write'):
-        if st.button("Sync to Google Sheet"):
-            try:
-                client = gs['client']
-                key = gs['spreadsheet_key']
-                write_dataframe(client, key, gs['approvals_ws'], approvals_df)
-                mapping_df = st.session_state.get('data', {}).get('mapping')
-                name_col = 'name' if ('name' in mapping_df.columns) else (
-                    'SalesForce_Account_NAME' if 'SalesForce_Account_NAME' in mapping_df.columns else None)
-                out_df = mapping_df.copy()
-                if name_col:
-                    field_name = "Add-ons needed" if "Add-ons needed" in approvals_df.columns else ("Extras" if "Extras" in approvals_df.columns else None)
-                    base_cols = ["Account", "Final Plan", "Approved By", "Approved At"]
-                    opt_cols = []
-                    if field_name:
-                        opt_cols.append(field_name)
-                    if "Comment" in approvals_df.columns:
-                        opt_cols.append("Comment")
-                    cols = base_cols + opt_cols
-                    appr = approvals_df[cols].rename(
-                        columns={
-                            "Account": name_col,
-                            "Final Plan": "Final Plan",
-                            (field_name or "Extras"): "Final Add-ons needed",
-                            "Comment": "Approval Comment",
-                        }
-                    )
-                    out_df = out_df.merge(appr, on=name_col, how="left")
-                write_dataframe(client, key, gs['updated_map_ws'], out_df)
-                st.success("Synced approvals and updated mapping to Google Sheet.")
-            except Exception as e:
-                st.error(f"Google Sheets sync error: {e}")
+    # Google Sheets sync removed
 
     st.divider()
     st.subheader("🕵️ Agent & Human Review")

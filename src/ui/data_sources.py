@@ -1,19 +1,61 @@
 from __future__ import annotations
 
-import json
 import streamlit as st
 import pandas as pd
 
-from src.data_loader import load_all_data, load_from_excel, suggest_excel_sheet_mapping
-from src.sheets import make_client, extract_key_from_url
+from src.data_loader import load_from_excel, suggest_excel_sheet_mapping
+from src.airtable import AirtableConfig, load_cached_or_fetch
+from src.plan_definitions import get_active_plan_json
 from src.ui.helpers import get_airtable_config
+from src.config import AIRTABLE as AT_CFG
 
 
 def render():
     st.subheader("Connect Data Sources")
-    source = st.radio("Select data source", ["Airtable", "Excel Workbook", "CSV Files (default)", "Google Sheets"], index=0)
+    source = st.radio("Select data source", ["Airtable", "Excel Workbook"], index=0)
 
-    if source == "Excel Workbook":
+    if source == "Airtable":
+        # Show status and allow manual API key input
+        env_base_id = AT_CFG.get('BASE_ID', '')
+        env_table = AT_CFG.get('TABLE', '')
+        env_view = AT_CFG.get('VIEW', '')
+        env_cache = AT_CFG.get('CACHE_PATH', 'data/airtable_mapping.json')
+
+        st.session_state.setdefault('airtable_manual', {'api_key': AT_CFG.get('API_KEY', '')})
+        api_key = st.text_input("Airtable API Key", value=st.session_state['airtable_manual'].get('api_key', ''), type="password")
+        st.session_state['airtable_manual']['api_key'] = (api_key or '').strip()
+        st.caption("Base and table are preconfigured; enter API key if not in .env.")
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Save API Key"):
+                st.success("Saved in session. You can now load from Airtable.")
+        with col_b:
+            if st.button("Load from Airtable"):
+                if not api_key:
+                    st.error("Please enter an Airtable API Key.")
+                elif not env_base_id or not env_table:
+                    st.error("Airtable Base/Table not configured. Set in .env.")
+                else:
+                    try:
+                        with st.spinner("Fetching from Airtable..."):
+                            cfg = AirtableConfig(api_key=api_key, base_id=env_base_id, table_id_or_name=env_table, view=env_view or None)
+                            df = load_cached_or_fetch(cfg, env_cache, ttl_seconds=0)
+                            data = {'mapping': df, 'plan_json': get_active_plan_json(), '_source': 'airtable_live'}
+                            st.session_state['data'] = data
+                            st.success(f"Loaded {len(df)} records from Airtable.")
+                    except Exception as e:
+                        st.error(f"Airtable error: {e}")
+
+        # Sidebar indicator
+        airtable_cfg = get_airtable_config()
+        if airtable_cfg:
+            st.sidebar.success("✅ Airtable sync enabled")
+        else:
+            st.sidebar.warning("⚠️ Airtable sync disabled")
+            st.sidebar.caption("Provide API key in Data Sources")
+
+    elif source == "Excel Workbook":
         upl = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
         if upl is not None:
             try:
@@ -34,65 +76,3 @@ def render():
                         st.success("Excel data loaded.")
             except Exception as e:
                 st.error(f"Excel error: {e}")
-
-    elif source == "CSV Files (default)":
-        st.write("Using default CSV filenames from repo root.")
-        if st.button("Load from CSV"):
-            data = load_all_data()
-            if data:
-                st.session_state["data"] = data
-                st.success("CSV data loaded.")
-
-    elif source == "Google Sheets":
-        st.write("Provide Google Sheets URL(s) and Service Account JSON.")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            default_url = "https://docs.google.com/spreadsheets/d/12uSZdBwdR_RrbxTW7xrx0yuf9idXVEHIgjQ2nLm-KCE/edit?gid=1389810451"
-            sheet_url = st.text_input("Google Sheet URL (auto-detected)", value=default_url)
-            map_ws = st.text_input("Mapping Worksheet Name", value="Account Migration mapping (9)")
-            approvals_ws = st.text_input("Approvals Worksheet Name (write-back)", value="Approvals")
-            updated_map_ws = st.text_input("Updated Mapping Sheet (write-back)", value="Account<>CSM<>Project (updated)")
-            enable_write = st.checkbox("Enable write-back to Google Sheet", value=True, help="Service Account must have edit access to this spreadsheet.")
-        with col_b:
-            creds_json = st.text_area("Service Account JSON", height=220)
-
-        if st.button("Connect & Load Sheets"):
-            effective_creds = creds_json.strip()
-            if not effective_creds:
-                try:
-                    from src.config import GOOGLE_SERVICE_ACCOUNT_JSON as _GS
-                    effective_creds = _GS.strip()
-                except Exception:
-                    effective_creds = ""
-            if not effective_creds:
-                st.error("Service Account JSON is required (paste it here or set GOOGLE_SERVICE_ACCOUNT_JSON in secrets).")
-            else:
-                try:
-                    client = make_client(effective_creds)
-                    key = extract_key_from_url(sheet_url)
-                    if not key:
-                        st.error("Could not extract spreadsheet key from the URL.")
-                    else:
-                        st.session_state['gsheets'] = {
-                            'client': client,
-                            'spreadsheet_key': key,
-                            'approvals_ws': approvals_ws,
-                            'updated_map_ws': updated_map_ws,
-                            'enable_write': enable_write,
-                        }
-                        st.success("Connected to Google Sheets. You can now use write-back features.")
-                except Exception as e:
-                    st.error(f"Google Sheets error: {e}")
-
-    # Sidebar Airtable status indicator
-    airtable_cfg = get_airtable_config()
-    if airtable_cfg:
-        st.sidebar.success("✅ Airtable sync enabled")
-        if st.sidebar.button("🔄 Reset Airtable Config", help="Clear cached config and reload from .env"):
-            st.session_state.pop("airtable_manual", None)
-            st.session_state.pop("airtable_initialized", None)
-            st.rerun()
-    else:
-        st.sidebar.warning("⚠️ Airtable sync disabled")
-        st.sidebar.caption("Configure in Data Sources tab")
-

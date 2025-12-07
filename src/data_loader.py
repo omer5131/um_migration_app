@@ -149,12 +149,11 @@ def flatten_family_plan_json(nested: dict) -> tuple[dict, list]:
 
 @st.cache_data
 def load_all_data():
-    """Load mapping/accounts with preference for cached Airtable; fallback to CSVs.
+    """Load mapping/accounts with preference for Airtable; fallback to Excel.
 
     Load order:
     1) Airtable cache (or live Airtable if configured)
     2) Local Excel workbook found under data/ (best-effort sheet detection)
-    3) CSV fallback (legacy)
     """
     data = {}
 
@@ -187,7 +186,7 @@ def load_all_data():
             data['_source'] = "airtable_live"
             used_airtable = True
         except Exception as e:
-            st.warning(f"Airtable fetch failed, falling back to CSV: {e}")
+            st.warning(f"Airtable fetch failed, attempting Excel fallback: {e}")
 
     # Fallback to a local Excel workbook under data/
     if not used_airtable:
@@ -227,11 +226,9 @@ def load_all_data():
                     data['_source'] = f"excel:{os.path.basename(path)}:{sheet}"
                     excel_loaded = True
         except Exception as e:
-            st.warning(f"Local Excel load failed, will try CSV fallback: {e}")
+            st.warning(f"Local Excel load failed: {e}")
 
-        if not excel_loaded:
-            st.info("No suitable Excel found in data/. Trying CSV fallback.")
-        else:
+        if excel_loaded:
             # Accounts CSV is optional; if present, load
             try:
                 data['accounts'] = pd.read_csv(FILES['accounts'])
@@ -239,44 +236,12 @@ def load_all_data():
                 data['accounts'] = pd.DataFrame()
             data['plan_json'] = get_active_plan_json()
             return data
-
-    # Fallback to CSVs for mapping/accounts
-    if not used_airtable and 'mapping' not in data:
-        try:
-            data['mapping'] = pd.read_csv(FILES['account_csm_project'])
-            data['_source'] = "csv"
-        except FileNotFoundError as e:
-            st.error(f"Missing File: {e}")
-            return None
-
-    # Accounts CSV is optional; if present, load
-    try:
-        data['accounts'] = pd.read_csv(FILES['accounts'])
-    except FileNotFoundError:
-        data['accounts'] = pd.DataFrame()
-
-    # Use hard-coded plan mapping
-    data['plan_json'] = get_active_plan_json()
-    return data
+    # If reached here, no data source succeeded
+    st.error("No data loaded. Configure Airtable or upload an Excel workbook in Data Sources.")
+    return None
 
 
-@st.cache_data
-def load_from_csv_paths(accounts_path: str, mapping_path: str):
-    """Load CSVs directly from provided paths; use hard-coded plan JSON."""
-    try:
-        accounts_df = pd.read_csv(accounts_path)
-    except FileNotFoundError:
-        accounts_df = pd.DataFrame()
-    try:
-        mapping_df = pd.read_csv(mapping_path)
-    except FileNotFoundError as e:
-        st.error(f"Missing File: {e}")
-        return None
-    return {
-        'accounts': accounts_df,
-        'mapping': mapping_df,
-        'plan_json': get_active_plan_json(),
-    }
+# Removed legacy CSV loaders
 
 
 @st.cache_data

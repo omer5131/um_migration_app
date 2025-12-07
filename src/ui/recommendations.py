@@ -27,7 +27,7 @@ def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
                 data = loaded
                 st.session_state['data'] = data
             else:
-                st.warning("No mapping table loaded yet. Go to 'Data Sources' to connect Airtable or Sheets.")
+                st.warning("No mapping table loaded yet. Go to 'Data Sources' to connect Airtable or upload Excel.")
                 st.stop()
         except Exception:
             st.warning("Failed to load mapping. Go to 'Data Sources'.")

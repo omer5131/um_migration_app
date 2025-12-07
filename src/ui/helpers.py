@@ -10,7 +10,6 @@ import pandas as pd
 from src.json_reorder import reorder_features_json
 from src.config import EXTRA_COST_FEATURES, GA_FEATURES, IRRELEVANT_FEATURES
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
-from src.sheets import write_dataframe
 
 
 _DISPLAY_KEY_MAP = {
@@ -120,11 +119,8 @@ def autosave_exports(store) -> None:
         st.session_state['last_export_excel'] = build_updated_excel_bytes(st.session_state.get('data', {}), store.all())
         save_updated_excel_file("data/updated_migration.xlsx", st.session_state.get('data', {}), store.all())
         st.info("Auto-saved updated Excel to data/updated_migration.xlsx")
-        gs = st.session_state.get('gsheets')
-        if gs and gs.get('enable_write'):
-            write_dataframe(gs['client'], gs['spreadsheet_key'], gs['approvals_ws'], store.all())
     except Exception as e:
-        st.warning(f"Excel/Sheets export error: {e}")
+        st.warning(f"Excel export error: {e}")
 
 
 def get_airtable_config():

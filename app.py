@@ -15,7 +15,6 @@ from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
 from src.exporter import build_updated_excel_bytes, save_updated_excel_file
 from src.persistence import ApprovalsStore
-from src.sheets import make_client, load_from_sheets, extract_key_from_url, write_dataframe
 from src.config import AIRTABLE as AT_CFG
 # Note: Airtable client functions are used indirectly through persistence
 from src.plan_definitions import get_flat_plan_json, get_active_plan_json
@@ -167,10 +166,8 @@ def main():
             st.markdown(
                 "- Preferred: Airtable auto-load (if configured).\n"
                 "- If needed, open Data Sources and either:\n"
-                "  - Enter AIRTABLE_API_KEY only (Base/Table are preconfigured), or\n"
-                "  - Upload Excel, or\n"
-                "  - Use built-in CSVs, or\n"
-                "  - Connect a Google Sheet (requires a Service Account JSON)."
+                "  - Enter Airtable API key only (Base/Table are preconfigured), or\n"
+                "  - Upload Excel."
             )
         with st.expander("2) Run recommendations", expanded=True):
             st.markdown(
@@ -194,7 +191,6 @@ def main():
             st.markdown(
                 "- Approvals are saved to CSV and, when configured, synced to Airtable automatically.\n"
                 "- Click 'Generate Updated Excel' to produce an updated workbook.\n"
-                "- If connected to Google Sheets, you can sync approvals and the updated mapping back to the sheet.\n"
                 "- See the 'Approved' tab to view/search approvals and optionally sync them to Airtable or download CSV."
             )
 
@@ -220,7 +216,7 @@ def main():
 
         st.header("Troubleshooting")
         st.markdown(
-            "- Airtable not configured: the app falls back to CSV; add an API key if asked.\n"
+            "- Airtable not configured: enter an API key in Data Sources.\n"
             "- No candidates: ensure the plan mapping is loaded (Data Sources) and Sub Type is correct.\n"
             "- OpenAI errors: provide an API key in the sidebar for AI features.\n"
             "- Cache refresh issues: use Data Sources → Airtable → Save API Key again, or reload the app."
