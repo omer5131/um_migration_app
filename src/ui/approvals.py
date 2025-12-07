@@ -11,7 +11,35 @@ def render(store):
     st.subheader("Approved")
 
     airtable_config = get_airtable_config()
-    show_local = st.checkbox("Show only local approvals (skip Airtable)", value=False)
+    # Default to local view so recent approvals (with merged add-ons) appear immediately
+    show_local = st.checkbox("Show only local approvals (skip Airtable)", value=True)
+
+    # Manual sync to Airtable to avoid waiting on deferred background sync
+    if airtable_config:
+        col_sync_a, col_sync_b = st.columns(2)
+        with col_sync_a:
+            if st.button("Sync approvals to Airtable now"):
+                try:
+                    cfg = airtable_config
+                    with st.spinner("Syncing to Airtable..."):
+                        ok, msg, created, updated = store.sync_to_airtable(
+                            cfg['api_key'], cfg['base_id'], cfg['approvals_table'], backup=True
+                        )
+                    st.session_state.pop('approvals_df_cached', None)
+                    if ok:
+                        st.success(f"Airtable sync complete: {created} created, {updated} updated")
+                    else:
+                        st.warning(msg)
+                except Exception as e:
+                    st.warning(f"Airtable sync error: {e}")
+        with col_sync_b:
+            if st.button("Reload approvals from Airtable"):
+                st.session_state.pop('approvals_df_cached', None)
+                try:
+                    st.rerun()
+                except Exception:
+                    # Fallback for older Streamlit versions
+                    pass
 
     try:
         if show_local:
@@ -59,8 +87,52 @@ def render(store):
         st.info("No approvals saved yet.")
         return
 
+    # Ensure "Add-ons needed" shows merged extras + applied add-on plans for display
+    try:
+        def _to_listish(val):
+            import json as _json
+            if val is None:
+                return []
+            if isinstance(val, list):
+                return [str(x).strip() for x in val if str(x).strip()]
+            s = str(val)
+            if not s or s.lower() == 'none':
+                return []
+            s = s.strip()
+            # Try JSON array
+            if (s.startswith('[') and s.endswith(']')) or (s.startswith('{') and s.endswith('}')):
+                try:
+                    parsed = _json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            # Fallback: comma-separated
+            return [x.strip() for x in s.split(',') if x.strip()]
+
+        if 'Applied Add-on Plans' in df_appr.columns:
+            left = df_appr.get('Add-ons needed')
+            right = df_appr.get('Applied Add-on Plans')
+            merged_col = []
+            for a, b in zip(left.fillna('') if left is not None else [], right.fillna('') if right is not None else []):
+                merged = []
+                seen = set()
+                for item in _to_listish(a) + _to_listish(b):
+                    key = item.lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        merged.append(item)
+                merged_col.append(', '.join(merged))
+            if merged_col:
+                df_appr['Add-ons needed'] = merged_col
+    except Exception:
+        pass
+
     q = st.text_input("Search approvals", placeholder="Filter by account, subtype, plan, etc.")
     view = df_appr.copy()
+    # Use user-friendly column name for on-screen display
+    if 'Comment' in view.columns and 'Approval Comment' not in view.columns:
+        view = view.rename(columns={'Comment': 'Approval Comment'})
 
     if 'Approved At' in view.columns:
         try:
@@ -77,7 +149,7 @@ def render(store):
         view = view[mask.any(axis=1)]
 
     st.caption(f"{len(view)} approval(s)")
-    st.dataframe(view, use_container_width=True)
+    st.dataframe(view, width='stretch')
 
     csv_bytes = view.to_csv(index=False).encode("utf-8")
     st.download_button(
@@ -105,4 +177,3 @@ def render(store):
                 st.rerun()
             else:
                 st.warning("No matching records removed.")
-

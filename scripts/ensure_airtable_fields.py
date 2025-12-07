@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import os
+import sys
+from typing import List
+
+# Reuse Airtable helpers from the app
+import pathlib
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+from src.airtable import AirtableConfig, ensure_field_exists, fetch_records
+
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
+
+
+def main() -> int:
+    api_key = os.getenv("AIRTABLE_API_KEY", "").strip()
+    base_id = os.getenv("AIRTABLE_BASE_ID", "").strip()
+    table_id = os.getenv("AIRTABLE_APPROVALS_TABLE", "").strip() or os.getenv("AIRTABLE_TABLE", "").strip()
+
+    if not api_key:
+        print("ERROR: AIRTABLE_API_KEY is not set in environment.", file=sys.stderr)
+        return 2
+    if not base_id:
+        print("ERROR: AIRTABLE_BASE_ID is not set in environment.", file=sys.stderr)
+        return 2
+    if not table_id:
+        print("ERROR: AIRTABLE_APPROVALS_TABLE (or AIRTABLE_TABLE) is not set in environment.", file=sys.stderr)
+        return 2
+
+    cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+
+    # Fields we expect for full sync with the Recommendations & Agent page naming
+    desired_fields: List[str] = [
+        "Account",
+        "Sub Type",
+        "Final Plan",
+        "Add-ons needed",
+        "Gained by plan (not currently in project)",
+        "Approved By",
+        "Approved At",
+        "Comment",
+        # Optional analytics columns that may appear in CSV
+        "bloat_costly",
+        "irrelevantFeatures",
+    ]
+
+    created_or_exists = []
+    for fname in desired_fields:
+        ok = ensure_field_exists(cfg, fname, field_type="multilineText")
+        created_or_exists.append((fname, ok))
+
+    # Test access: fetch a small sample of records
+    try:
+        records = fetch_records(cfg)
+        count = len(records)
+        print(f"OK: Access verified. Records in table: {count}.")
+    except Exception as e:
+        print(f"ERROR: Could not fetch records: {e}", file=sys.stderr)
+        return 3
+
+    # Print summary of field ensure operations
+    succeeded = [f for f, ok in created_or_exists if ok]
+    failed = [f for f, ok in created_or_exists if not ok]
+    print(f"Fields ensured: {', '.join(succeeded) if succeeded else 'none'}")
+    if failed:
+        print(f"Fields not ensured (create failed or not allowed): {', '.join(failed)}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

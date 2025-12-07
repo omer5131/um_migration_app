@@ -91,6 +91,26 @@ def main():
             st.sidebar.warning(f"⚠️ Airtable: {st.session_state['auto_airtable_error'][:50]}")
 
     tab = st.sidebar.radio("Go to", nav_options, index=nav_index)
+    # Process deferred Airtable sync on tab navigation to avoid blocking approvals
+    prev_tab = st.session_state.get('prev_nav_tab')
+    if prev_tab is not None and prev_tab != tab and st.session_state.get('airtable_sync_pending'):
+        cfg = st.session_state.get('airtable_sync_config') or {}
+        api_key = cfg.get('api_key', '')
+        base_id = cfg.get('base_id', '')
+        table_id = cfg.get('table_id', '')
+        if api_key and base_id and table_id:
+            try:
+                with st.spinner("Syncing approvals to Airtable in background..."):
+                    ok, msg, created, updated = store.sync_to_airtable(api_key, base_id, table_id, backup=True)
+                if ok:
+                    st.sidebar.success(f"Airtable sync: {created} created, {updated} updated")
+                else:
+                    st.sidebar.warning(msg)
+            except Exception as e:
+                st.sidebar.warning(f"Airtable sync failed: {e}")
+            finally:
+                st.session_state['airtable_sync_pending'] = False
+    st.session_state['prev_nav_tab'] = tab
 
     st.sidebar.header("Configuration")
 
@@ -491,12 +511,14 @@ def main():
             if selected_plan:
                 feats = plan_map.get(selected_plan, [])
                 st.markdown(f"**Features in {selected_plan} ({len(feats)}):**")
-                st.dataframe(pd.DataFrame({"feature": feats}), use_container_width=True)
+                st.dataframe(pd.DataFrame({"feature": feats}), width='stretch')
 
     elif tab == "Approved":
         render_approved_tab(store)
         st.stop()
-        st.subheader("Approved Rows Store")
+        """ Deprecated duplicate Approved-tab UI kept below for reference.
+        The live implementation now lives in src/ui/approvals.py (render_approved_tab).
+        """
 
         # Get Airtable config (from Data Sources or .env)
         airtable_config = _get_airtable_config()
@@ -603,7 +625,7 @@ def main():
                 view = view[mask.any(axis=1)]
 
             st.caption(f"{len(view)} approval(s)")
-            st.dataframe(view, use_container_width=True)
+            st.dataframe(view, width='stretch')
 
             # Download CSV of current view
             csv_bytes = view.to_csv(index=False).encode("utf-8")
@@ -640,6 +662,11 @@ def main():
         # Render detailed review/candidate/approval panel
         from src.ui.review import render as render_review_panel
         render_review_panel(store, openai_key, approved_by, paid_bloat_penalty)
+        # Prevent duplicate UI: stop here since the Recommendations module renders the page
+        st.stop()
+        """ Deprecated duplicate Recommendations-tab UI kept below for reference.
+        The live implementation now lives in src/ui/recommendations.py and src/ui/review.py.
+        """
         # Load data either from session or fallback
         data = st.session_state.get("data") or load_all_data()
         if not data:
@@ -696,19 +723,19 @@ def main():
         with fcols[0]:
             if csm_col:
                 csm_vals = sorted([x for x in df[csm_col].dropna().unique()])
-                selected_csms = st.multiselect("Actual CSM", csm_vals, default=csm_vals)
+                selected_csms = st.multiselect("Actual CSM", csm_vals, default=csm_vals, key="filters_csm_plan_mapping")
             else:
                 selected_csms = None
         with fcols[1]:
             if subtype_col:
                 subtype_vals = sorted([x for x in df[subtype_col].dropna().unique()])
-                selected_subtypes = st.multiselect("Sub Type", subtype_vals, default=subtype_vals)
+                selected_subtypes = st.multiselect("Sub Type", subtype_vals, default=subtype_vals, key="filters_subtype_plan_mapping")
             else:
                 selected_subtypes = None
         with fcols[2]:
             if segment_col:
                 segment_vals = sorted([x for x in df[segment_col].dropna().unique()])
-                selected_segments = st.multiselect("Segment", segment_vals, default=segment_vals)
+                selected_segments = st.multiselect("Segment", segment_vals, default=segment_vals, key="filters_segment_plan_mapping")
             else:
                 selected_segments = None
 
@@ -730,7 +757,7 @@ def main():
         src_label = str(data.get('_source', ''))
         # Airtable cache refresh button removed; use Data Sources → Airtable → Save
 
-        if st.button("Run Migration Logic"):
+        if st.button("Run Migration Logic", key="run_migration_main_block"):
             results = []
             progress = st.progress(0)
             total = len(df_filtered)
@@ -784,7 +811,8 @@ def main():
                     plan_name = rec.get('recommended_plan')
                     plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))
                     user_features = set(parse_feature_list(row.get('featureNames', [])))
-                    extras_set = set(rec.get('extras', []))
+                    # Use feature_extras for calculations; extras is merged for display
+                    extras_set = set(rec.get('feature_extras', rec.get('extras', [])))
                     cls = _classify_sets(plan_features, user_features, extras_set)
                     bloat_features = cls['bloat_features']
                     bloat_costly = cls['bloat_costly']
@@ -795,11 +823,19 @@ def main():
                     rec['bloat_costly_count'] = len(bloat_costly)
                     rec['irrelevantFeatures'] = cls['irrelevant']
 
+                # Merge applied add-on plan names with feature-level extras for a single actionable column
+                try:
+                    # rec['extras'] is already merged for display/sync
+                    combined_addons = [str(x).strip() for x in rec.get('extras', []) if str(x).strip()]
+                except Exception:
+                    combined_addons = [str(x) for x in rec.get('extras', [])]
+
                 res_row = {
                     "Account": account_name,
                     "Sub Type": row.get('Sub Type', row.get('Subtype', 'Unknown')),
                     "Recommended Plan": rec['recommended_plan'],
-                    "Add-ons needed": ", ".join(rec['extras']),
+                    "Add-ons needed": ", ".join(combined_addons),
+                    "Applied Add-on Plans": ", ".join(rec.get('addOnPlans', [])),
                     "Extras Count": rec.get('extras_count', 0),
                     "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
                     "Gained by plan (not currently in project)": ", ".join(rec.get('bloat_features', [])),
@@ -1012,9 +1048,60 @@ def main():
                     st.selectbox("Final plan", plan_options, index=default_idx if plan_options else 0)
                     if plan_options else st.text_input("Final plan", value=current_plan, disabled=False)
                 )
-                new_extras_str = st.text_area("Final Add-ons needed (comma-separated)", value=", ".join(current_extras), height=80)
+                # Default extras: merge current extras with applied add-on plan names
+                try:
+                    user_feats_for_defaults = set(parse_feature_list(raw_data.get('featureNames', [])))
+                    applied_addon_plans_default = []
+                    for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                        used = {f for f in (addon_feats or set()) if f in user_feats_for_defaults}
+                        if used:
+                            applied_addon_plans_default.append(str(addon_name))
+                except Exception:
+                    applied_addon_plans_default = []
+                default_extras_merged = []
+                seen_defaults = set()
+                for x in list(current_extras) + applied_addon_plans_default:
+                    key = str(x).strip().lower()
+                    if key and key not in seen_defaults:
+                        seen_defaults.add(key)
+                        default_extras_merged.append(str(x).strip())
+
+                new_extras_str = st.text_area(
+                    "Final Add-ons needed (comma-separated)",
+                    value=", ".join(default_extras_merged),
+                    height=80,
+                )
+                comment_manual = st.text_area("Approval Comment (optional)", key="comment_manual_lock")
                 new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
 
+                # Live preview matching candidate preview: merge applied add-on plans into extras
+                try:
+                    user_feats_preview = set(parse_feature_list(raw_data.get('featureNames', [])))
+                    applied_addon_plans_preview = []
+                    for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                        used = {f for f in (addon_feats or set()) if f in user_feats_preview}
+                        if used:
+                            applied_addon_plans_preview.append(str(addon_name))
+                except Exception:
+                    applied_addon_plans_preview = []
+                merged_manual_extras = [x for x in (applied_addon_plans_preview + new_extras) if str(x).strip()]
+                try:
+                    plan_feats_prev = set(logic_engine.plan_definitions.get(new_plan, set()))
+                    cls_prev = _classify_sets(plan_feats_prev, user_feats_preview, set(merged_manual_extras))
+                    preview_payload = {
+                        'plan': new_plan,
+                        'addOnPlans': applied_addon_plans_preview,
+                        'extras': sorted(list(cls_prev['extras_norm'])),
+                        'bloat_features': _enrich_bloat_with_ga(cls_prev['bloat_features'], cls_prev.get('ga_will_appear', [])),
+                        'bloat_costly': cls_prev.get('bloat_costly', []),
+                        'irrelevantFeatures': cls_prev.get('irrelevant', []),
+                    }
+                    st.caption("Preview of manual selection")
+                    st.json(_preview_with_display_names(preview_payload))
+                except Exception:
+                    pass
+
+                st.caption("Saves your Human Override: manual plan and edited 'Add-ons needed' with Applied Add-on Plans merged.")
                 if st.button("Save & Lock (Human Approved)"):
                     if not approved_by.strip():
                         st.error("Please enter your name in the sidebar.")
@@ -1028,11 +1115,26 @@ def main():
                         except Exception:
                             cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
 
-                        details_payload = _make_details_payload(new_plan, cls, new_extras)
+                        # Include applied Add-on Plans in Add-ons needed
+                        try:
+                            user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                            applied_addon_plans = []
+                            for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                                used = {f for f in (addon_feats or set()) if f in user_feats}
+                                if used:
+                                    applied_addon_plans.append(str(addon_name))
+                        except Exception:
+                            applied_addon_plans = []
+                        combined_extras = [x for x in (applied_addon_plans + list(new_extras)) if str(x).strip()]
+
+                        details_payload = _make_details_payload(new_plan, cls, combined_extras, comment=comment_manual)
+                        # Also include Applied Add-on Plans explicitly for Airtable/CSV analytics
+                        if applied_addon_plans:
+                            details_payload['Applied Add-on Plans'] = applied_addon_plans
 
                         # Save to CSV and sync to Airtable with backup
                         success, msg = _sync_approval_to_airtable(
-                            store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
+                            store, selected_acc, row['Sub Type'], new_plan, combined_extras, approved_by.strip(), details=details_payload
                         )
                         if success:
                             st.success(f"Saved and locked! {msg}")
@@ -1114,25 +1216,29 @@ def main():
                     try:
                         plan_feats = set(logic_engine.plan_definitions.get(cand.get('plan'), set()))
                         user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
-                        extras_set = set(cand.get('extras', []))
+                        # Use feature_extras for calculations; extras is merged for display
+                        extras_set = set(cand.get('feature_extras', cand.get('extras', [])))
                         cls = _classify_sets(plan_feats, user_feats, extras_set)
                         enriched = dict(cand)
                         enriched['bloat_features'] = _enrich_bloat_with_ga(cand.get('bloat_features', []), cls.get('ga_will_appear', []))
                         st.json(_preview_with_display_names(enriched))
                     except Exception:
                         st.json(_preview_with_display_names(cand))
-                    if st.button("Approve Selected Option & Lock"):
+                    comment_candidate = st.text_area("Approval Comment (optional)", key="comment_approve_candidate")
+                    st.caption("Saves the selected Candidate's plan and a merged 'Add-ons needed' (extras + Applied Add-on Plans).")
+                    if st.button("Approve Selected Option & Lock", key="btn_approve_candidate"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
                         else:
                             # Save to CSV and sync to Airtable with backup
-                            cand_extras = [str(x).strip() for x in cand.get('extras', [])]
+                            # Use merged extras from candidate (already includes Applied Add-on Plans)
+                            cand_extras_all = [str(x).strip() for x in cand.get('extras', []) if str(x).strip()]
                             # Build detailed analytics payload for Airtable/CSV
                             details_payload = _make_details_payload(
-                                cand.get('plan', current_plan), cls, cand_extras
+                                cand.get('plan', current_plan), cls, cand_extras_all, comment=comment_candidate
                             )
                             success, msg = _sync_approval_to_airtable(
-                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
+                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras_all, approved_by.strip(), details=details_payload
                             )
                             if success:
                                 st.success(f"Selected candidate approved and locked! {msg}")
@@ -1167,17 +1273,31 @@ def main():
                             }
                         )
                     )
+                    st.caption("Saves the AI Decision's plan and a merged 'Add-ons needed' (extras + Applied Add-on Plans).")
                     if st.button("Approve AI Decision & Lock"):
                         if not approved_by.strip():
                             st.error("Please enter your name in the sidebar.")
                         else:
                             # Save to CSV and sync to Airtable with backup
                             ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                            # Include applied Add-on Plans in Add-ons needed
+                            try:
+                                user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                                applied_addon_plans = []
+                                for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                                    used = {f for f in (addon_feats or set()) if f in user_feats}
+                                    if used:
+                                        applied_addon_plans.append(str(addon_name))
+                            except Exception:
+                                applied_addon_plans = []
+                            ai_extras_all = [x for x in (applied_addon_plans + ai_extras) if str(x).strip()]
                             details_payload = _make_details_payload(
-                                parsed.get('plan', current_plan), cls, ai_extras
+                                parsed.get('plan', current_plan), cls, ai_extras_all
                             )
+                            if applied_addon_plans:
+                                details_payload['Applied Add-on Plans'] = applied_addon_plans
                             success, msg = _sync_approval_to_airtable(
-                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
+                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras_all, approved_by.strip(), details=details_payload
                             )
                             if success:
                                 st.success(f"AI decision approved and locked! {msg}")

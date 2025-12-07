@@ -1,3 +1,8 @@
-Account,Sub Type,Final Plan,Extras,Approved By,Approved At,plan,add-ons to compatability,features on the house,bloat_costly,gaFeatures,GA present in account,GA will appear with plan,irrelevantFeatures
-Heidmar Inc,Shipowner,Shipowners Advanced,"hideHistoricalRiskIndicators, hideMapModule, hideMapTimelineOnVesselProfile, hideNotificationsCenter, nasAccidentsActivity, newAdvancedSearch, shadowFleetVOIs, softAoi, wetCargoData",Omer,1764168981,,,,,,,,
-DS NORDEN,Shipowner,Shipowners Premium,"hideMapTimelineOnVesselProfile, nasAccidentsActivity, nasAgGridTable, riskRanking, shadowFleetVOIs, softAoi",omer,1764173801,,,,,,,,
+Account,Sub Type,Final Plan,Add-ons needed,Approved By,Approved At,plan,add-ons to compatability,features on the house,bloat_costly,gaFeatures,GA present in account,GA will appear with plan,irrelevantFeatures,Gained by plan (not currently in project),Comment
+Heidmar Inc,Shipowner,Shipowners Advanced,"hideHistoricalRiskIndicators, hideMapModule, hideMapTimelineOnVesselProfile, hideNotificationsCenter, nasAccidentsActivity, newAdvancedSearch, shadowFleetVOIs, softAoi, wetCargoData",Omer,1764168981,,,,,,,,,,
+"LITASCO S.A.
+",Commodity Trader,Commodity Trader Core,"hideMapTimelineOnVesselProfile, nasAddVesselsToVoi, riskRanking",Omer,1765102941,Commodity Trader Core,,,[],,,,,"[""hideBorderSecurityRisk"", ""hideMapModule"", ""hideSafetyRisk"", ""sendHeartbeat"", ""weatherLayer""]",omer check 20
+"Shoreline
+",Insurance,Insurer Core,"enableODRPermissionsForAllUsers, hideMapTimelineOnVesselProfile, nasAddVesselsToVoi, organizationDefinedRisk, Companies Add-on, MAI Expert, STS Classification, NAS Premium CSV Columns",Omer,1765103372,Insurer Core,,,[],,,,,"[""Companies Add-on"", ""MAI Expert"", ""NAS Premium CSV Columns"", ""STS Classification"", ""hideBorderSecurityRisk"", ""hideSafetyRisk"", ""sendHeartbeat"", ""userAlreadyLoggedInWarning"", ""weatherLayer""]",omer check 12
+"Generali France
+",Insurance,Insurer Advanced,"hideHistoricalRiskIndicators, hideMapTimelineOnVesselProfile, nasAddVesselsToVoi, Companies Add-on, MAI Expert, UBO, Wet Cargo",Omer,1765108586,Insurer Advanced,,,[],,,,,"[""Companies Add-on"", ""MAI Expert"", ""UBO"", ""Wet Cargo"", ""hideBorderSecurityRisk"", ""hideRuleEngine"", ""hideSafetyRisk"", ""userAlreadyLoggedInWarning""]",Omer Check 99

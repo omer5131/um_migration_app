@@ -151,26 +151,16 @@ def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
                 rec['bloat_costly_count'] = len(bloat_costly)
                 rec['irrelevantFeatures'] = cls['irrelevant']
 
-            # Combine add-on plan names with feature extras for a single actionable column
-            combined_addons = []
-            try:
-                plan_names = [str(x).strip() for x in rec.get('addOnPlans', []) if str(x).strip()]
-                feature_extras = [str(x).strip() for x in rec.get('extras', []) if str(x).strip()]
-                combined_addons = [x for x in (plan_names + feature_extras) if x]
-            except Exception:
-                combined_addons = rec.get('extras', [])
-
             res_row = {
                 "Account": account_name,
                 "Sub Type": row.get('Sub Type', row.get('Subtype', 'Unknown')),
                 "Recommended Plan": rec['recommended_plan'],
-                "Add-ons needed": ", ".join(combined_addons),
-                "Applied Add-on Plans": ", ".join(rec.get('addOnPlans', [])),
+                "Add-ons needed": ", ".join(rec['extras']),
                 "Extras Count": rec.get('extras_count', 0),
-                "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
                 "Gained by plan (not currently in project)": ", ".join(rec.get('bloat_features', [])),
                 "Costly Bloat Count": rec.get('bloat_costly_count', 0),
                 "Bloat Score": rec.get('bloat_score', 0),
+                "Irrelevant Features": ", ".join(rec.get('irrelevantFeatures', [])),
                 "Status": rec['status'],
                 "Raw Rec": rec,
             }
@@ -180,13 +170,7 @@ def render(store, use_ai_bulk: bool, openai_key: str, paid_bloat_penalty: int):
         st.session_state['results'] = pd.DataFrame(results)
         st.session_state['df_filtered'] = df_filtered
 
-    if 'results' in st.session_state:
-        res_df = st.session_state['results']
-        st.subheader("Migration Overview")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Accounts", len(res_df))
-        col2.metric("Zero Add-ons", len(res_df[res_df['Extras Count'] == 0]))
-        col3.metric("High Bloat (>5)", len(res_df[res_df['Bloat Score'] > 5]))
+    # Post-run summary metrics are displayed in the Review panel to avoid duplication.
 
     # The rest of the original app shows the review panel, candidate selection, and approval actions.
     # To keep this refactor scoped, we'll leave that detailed UI in app.py for now.

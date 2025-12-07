@@ -15,6 +15,7 @@ from src.sheets import write_dataframe
 
 _DISPLAY_KEY_MAP = {
     "plan": "Final plan",
+    "addOnPlans": "Applied Add-on Plans",
     "extras": "Add-ons needed",
     "bloat_features": "Gained by plan (not currently in project)",
     "bloat_costly": "Bloat-costly",
@@ -22,21 +23,34 @@ _DISPLAY_KEY_MAP = {
 
 
 def preview_with_display_names(data: Dict) -> Dict:
+    """Preview JSON merging Applied Add-on Plans into Add-ons needed."""
     ordered = reorder_features_json(data)
-    order = [
-        "plan",
-        "extras",
-        "bloat_features",
-        "bloat_costly",
-        "irrelevantFeatures",
-    ]
+
+    def _norm_list(val):
+        if isinstance(val, list):
+            return [str(x).strip() for x in val if str(x).strip()]
+        return [str(x).strip() for x in (val or []) if str(x).strip()]
+
+    plan_val = ordered.get("plan") if ordered.get("plan") is not None else data.get("plan")
+    extras = _norm_list(ordered.get("extras") or data.get("extras"))
+    applied_plans = _norm_list(ordered.get("addOnPlans") or data.get("addOnPlans"))
+
+    seen = set()
+    merged_extras = []
+    for x in extras + applied_plans:
+        key = x.lower()
+        if key and key not in seen:
+            seen.add(key)
+            merged_extras.append(x)
+
     out: Dict = {}
-    for k in order:
-        display = _DISPLAY_KEY_MAP.get(k, k)
-        if k == "plan":
-            out[display] = ordered.get(k) if ordered.get(k) is not None else data.get(k)
-        else:
-            out[display] = ordered.get(k, data.get(k, []))
+    out[_DISPLAY_KEY_MAP["plan"]] = plan_val
+    out[_DISPLAY_KEY_MAP["extras"]] = merged_extras
+    out[_DISPLAY_KEY_MAP["bloat_features"]] = ordered.get("bloat_features", data.get("bloat_features", []))
+    out[_DISPLAY_KEY_MAP["bloat_costly"]] = ordered.get("bloat_costly", data.get("bloat_costly", []))
+    # Some builds map irrelevantFeatures to same display name; keep if present
+    if _DISPLAY_KEY_MAP.get("irrelevantFeatures"):
+        out[_DISPLAY_KEY_MAP.get("irrelevantFeatures")] = ordered.get("irrelevantFeatures", data.get("irrelevantFeatures", []))
     return out
 
 
@@ -75,15 +89,30 @@ def classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[st
     }
 
 
-def make_details_payload(plan_name: str, cls: dict, extras_list: List[str]) -> dict:
-    return {
+def make_details_payload(plan_name: str, cls: dict, extras_list: List[str], comment: str | None = None) -> dict:
+    # Normalize extras list defensively (handle pandas Series or comma-separated string)
+    try:
+        import pandas as _pd  # optional
+    except Exception:
+        _pd = None
+    if _pd is not None and isinstance(extras_list, getattr(_pd, 'Series', ())):
+        extras_iter = [x for x in extras_list.dropna().tolist()]
+    elif isinstance(extras_list, str):
+        extras_iter = [x.strip() for x in extras_list.split(',')]
+    else:
+        extras_iter = extras_list or []
+
+    payload = {
         'plan': plan_name,
-        'Add-ons needed': [str(x).strip() for x in extras_list],
+        'Add-ons needed': [str(x).strip() for x in extras_iter if str(x).strip()],
         'Gained by plan (not currently in project)': enrich_bloat_with_ga(
             cls.get('bloat_features', []), cls.get('ga_will_appear', [])
         ),
         'bloat_costly': list(cls.get('bloat_costly', [])),
     }
+    if comment is not None and str(comment).strip():
+        payload['Comment'] = str(comment).strip()
+    return payload
 
 
 def autosave_exports(store) -> None:
@@ -118,21 +147,28 @@ def get_airtable_config():
 
 
 def sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str, details: dict | None = None) -> tuple:
-    try:
-        config = get_airtable_config()
-        if config:
-            api_key = config.get('api_key', '').strip()
-            base_id = config.get('base_id', '').strip()
-            table_id = config.get('approvals_table', '').strip()
-            if not api_key or not base_id or not table_id:
-                store.upsert(account, subtype, plan, extras, approved_by, details=details)
-                return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
-            airtable_config = {'api_key': api_key, 'base_id': base_id, 'table_id': table_id}
-            return store.upsert_and_sync(account, subtype, plan, extras, approved_by, airtable_config, details=details)
-        else:
-            store.upsert(account, subtype, plan, extras, approved_by, details=details)
-            return True, "Saved to CSV (Airtable not configured)"
-    except Exception as e:
-        store.upsert(account, subtype, plan, extras, approved_by, details=details)
-        return True, f"Saved to CSV but sync failed: {str(e)}"
+    """Persist locally immediately and defer Airtable sync to navigation time.
 
+    This avoids blocking the UI on REST calls. A pending flag is stored in session state
+    and processed when the user navigates between top-level tabs.
+    """
+    try:
+        # Always upsert locally first
+        store.upsert(account, subtype, plan, extras, approved_by, details=details)
+
+        config = get_airtable_config()
+        api_key = (config or {}).get('api_key', '').strip() if config else ''
+        base_id = (config or {}).get('base_id', '').strip() if config else ''
+        table_id = (config or {}).get('approvals_table', '').strip() if config else ''
+
+        if api_key and base_id and table_id:
+            # Mark sync as pending and stash config for later
+            st.session_state['airtable_sync_pending'] = True
+            st.session_state['airtable_sync_config'] = {'api_key': api_key, 'base_id': base_id, 'table_id': table_id}
+            return True, "Saved to CSV (Airtable sync deferred; will run on next navigation)"
+        else:
+            if not config:
+                return True, "Saved to CSV (Airtable not configured)"
+            return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
+    except Exception as e:
+        return True, f"Saved to CSV; deferred sync setup failed: {str(e)}"

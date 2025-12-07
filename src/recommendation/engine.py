@@ -228,8 +228,9 @@ class MigrationLogic:
             plan_norm = p["normal"]
 
             covered = sorted(user_norm & plan_norm)
-            extras = sorted(user_norm - plan_norm)
-            extras_weighted = len(extras)
+            # Feature-level extras missing from the base plan
+            feature_extras = sorted(user_norm - plan_norm)
+            extras_weighted = len(feature_extras)
             bloat = sorted(plan_norm - user_norm)
             cost_set = {x.lower() for x in EXTRA_COST_FEATURES}
             bloat_costly = [b for b in bloat if str(b).strip().lower() in cost_set]
@@ -241,7 +242,7 @@ class MigrationLogic:
             bv_score = self._business_value_score(
                 coverage_count=len(covered),
                 user_count=len(user_features),
-                extras_count=len(extras),
+                extras_count=len(feature_extras),
                 missing_critical=missing_critical,
                 subtype_aligned=subtype_aligned,
                 synonym_used=synonym_used,
@@ -250,17 +251,29 @@ class MigrationLogic:
             ga_combined = sorted(list((u["ga"] | p["ga"])) )
             irr_combined = sorted(list((u["irrelevant"] | p["irrelevant"])) )
 
+            # Display/Sync: Merge applied add-on plan names into Add-ons needed
+            merged_extras: List[str] = []
+            seen_me = set()
+            for x in list(feature_extras) + list(applied_add_ons):
+                key = str(x).strip().lower()
+                if key and key not in seen_me:
+                    seen_me.add(key)
+                    merged_extras.append(str(x).strip())
+
             row_data = {
                 "plan": plan,
                 "addOnPlans": list(applied_add_ons),
                 "covered_features": covered,
-                "extras": extras,
+                # extras: merged for display/sync; feature_extras kept for internal calculations
+                "extras": merged_extras,
+                "feature_extras": feature_extras,
                 "bloat_features": bloat,
                 "bloat_score": len(bloat),
                 "bloat_costly": bloat_costly,
                 "bloat_costly_count": len(bloat_costly),
                 "bloat_weighted": bloat_weighted,
-                "extras_count": len(extras),
+                # Keep ranking based on feature extras only
+                "extras_count": len(feature_extras),
                 "extras_weighted": extras_weighted,
                 "coverage_count": len(covered),
                 "business_value_score": bv_score,
@@ -268,7 +281,7 @@ class MigrationLogic:
                 "irrelevantFeatures": irr_combined,
                 "planFeatures": sorted(list(plan_norm)),
                 "accountFeatures": sorted(list(user_norm)),
-                "missingFeatures": extras,
+                "missingFeatures": feature_extras,
             }
             analyses.append(row_data)
             if len(bloat_costly) == 0:
@@ -318,7 +331,9 @@ class MigrationLogic:
             "recommended_plan": winner["plan"],
             "addOnPlans": list(applied_add_ons),
             "covered_features": winner["covered_features"],
+            # Expose merged extras for display/sync and feature_extras for calculations
             "extras": winner["extras"],
+            "feature_extras": winner.get("feature_extras", []),
             "bloat_features": winner["bloat_features"],
             "bloat_score": winner["bloat_score"],
             "bloat_costly": winner["bloat_costly"],
@@ -335,6 +350,7 @@ class MigrationLogic:
                     "plan": a["plan"],
                     "addOnPlans": a.get("addOnPlans", []),
                     "extras": a["extras"],
+                    "feature_extras": a.get("feature_extras", []),
                     "extras_weighted": a["extras_weighted"],
                     "bloat_features": a["bloat_features"],
                     "bloat_count": a["bloat_score"],
@@ -357,6 +373,7 @@ class MigrationLogic:
                     "plan": a["plan"],
                     "addOnPlans": a.get("addOnPlans", []),
                     "extras": a["extras"],
+                    "feature_extras": a.get("feature_extras", []),
                     "extras_weighted": a["extras_weighted"],
                     "bloat_features": a["bloat_features"],
                     "bloat_count": a["bloat_score"],

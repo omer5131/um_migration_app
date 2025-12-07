@@ -28,14 +28,21 @@ def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
         )
         out_df = mapping_df.copy()
         if name_col:
-            # Merge approved plan and add-ons needed
+            # Merge approved plan, add-ons, approver, timestamp, and comment (if provided)
             field_name = "Add-ons needed" if "Add-ons needed" in approvals_df.columns else ("Extras" if "Extras" in approvals_df.columns else None)
-            cols = ["Account", "Final Plan", "Approved By", "Approved At"] + ([field_name] if field_name else [])
+            base_cols = ["Account", "Final Plan", "Approved By", "Approved At"]
+            opt_cols = []
+            if field_name:
+                opt_cols.append(field_name)
+            if "Comment" in approvals_df.columns:
+                opt_cols.append("Comment")
+            cols = base_cols + opt_cols
             appr = approvals_df[cols].rename(
                 columns={
                     "Account": name_col,
                     "Final Plan": "Final Plan",
                     (field_name or "Extras"): "Final Add-ons needed",
+                    "Comment": "Approval Comment",
                 }
             )
             # Prefer left merge to keep all mapping rows

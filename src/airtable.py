@@ -154,6 +154,74 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
     to_create: List[Dict[str, Any]] = []
     to_update: List[Dict[str, Any]] = []
 
+    CORE_FIELDS = {
+        'Final plan',
+        'Add-ons needed',
+        'Gained by plan (not currently in project)',
+        'Approved By',
+        'Approved At',
+        'Comment',
+    }
+
+    def _is_empty(v: Any) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, str):
+            return len(v.strip()) == 0
+        if isinstance(v, (list, dict)):
+            return len(v) == 0
+        return False
+
+    def _parse_ts(v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                return int(v)
+            s = str(v).strip()
+            if not s:
+                return None
+            # Expect ISO; pandas can parse
+            ts = pd.to_datetime(s, utc=True, errors='coerce')
+            if ts is not None and not pd.isna(ts):
+                return int(ts.timestamp())
+        except Exception:
+            return None
+        return None
+
+    def _normalize_value(v: Any) -> Any:
+        # None stays None
+        if v is None:
+            return None
+        # Pandas NA/NaN handling for scalars
+        try:
+            if isinstance(v, float) and pd.isna(v):
+                return None
+        except Exception:
+            pass
+        # Series -> join string values; drop NA
+        try:
+            import pandas as _pd
+            if isinstance(v, getattr(_pd, 'Series', ())) or str(type(v)).endswith(".Series'>"):
+                try:
+                    vals = [str(x).strip() for x in v.dropna().tolist() if str(x).strip()]
+                    return ", ".join(vals) if vals else None
+                except Exception:
+                    return str(v)
+        except Exception:
+            pass
+        # Lists/dicts pass through as-is (Airtable can accept arrays for multiselects if configured)
+        if isinstance(v, (list, dict)):
+            return v
+        # Generic NA-like
+        try:
+            if pd.isna(v):
+                return None
+        except Exception:
+            pass
+        # Fallback stringify
+        return v
+
     for row in df.to_dict(orient="records"):
         key_val = str(row.get(key_field, "")).strip()
         if not key_val:
@@ -161,23 +229,31 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
         # Filter out None, NaN, and convert numeric NaN to None
         fields = {}
         for k, v in row.items():
-            if v is None:
+            nv = _normalize_value(v)
+            if nv is None:
                 continue
-            # Check for NaN values (float NaN)
-            if isinstance(v, float) and pd.isna(v):
-                continue
-            # Check for pandas NA (but not for lists/arrays)
-            if not isinstance(v, (list, dict)):
-                try:
-                    if pd.isna(v):
-                        continue
-                except (TypeError, ValueError):
-                    # pd.isna() may fail on some types, just keep the value
-                    pass
-            fields[k] = v
+            fields[k] = nv
 
         if key_val in existing:
-            to_update.append({"id": existing[key_val]["id"], "fields": fields})
+            ex_fields = existing[key_val].get("fields", {}) or {}
+            merged: Dict[str, Any] = {}
+            our_ts = _parse_ts(fields.get('Approved At'))
+            ex_ts = _parse_ts(ex_fields.get('Approved At'))
+            for k, v in fields.items():
+                if _is_empty(v):
+                    continue
+                if k in CORE_FIELDS:
+                    # Only update core fields if our timestamp is newer/equal, else skip to avoid overriding
+                    if ex_ts is not None and our_ts is not None and our_ts < ex_ts:
+                        continue
+                    merged[k] = v
+                else:
+                    # Non-core: only fill if missing/empty in Airtable to avoid overriding others' values
+                    if k in ex_fields and not _is_empty(ex_fields.get(k)):
+                        continue
+                    merged[k] = v
+            if merged:
+                to_update.append({"id": existing[key_val]["id"], "fields": merged})
         else:
             to_create.append({"fields": fields})
 
@@ -216,6 +292,69 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
     return created, updated
 
 
+def ensure_field_exists(cfg: AirtableConfig, desired_field_name: str, field_type: str = "multilineText") -> bool:
+    """Best-effort attempt to ensure a field exists on an Airtable table.
+
+    Requires access to the Airtable Metadata API. If unavailable or the request fails,
+    this function safely returns False without interrupting the caller.
+
+    Args:
+        cfg: AirtableConfig with base_id and table_id_or_name
+        desired_field_name: Field name to ensure exists (case-sensitive)
+        field_type: Airtable field type (e.g., 'multilineText', 'singleLineText')
+
+    Returns:
+        True if the field exists or was created; False otherwise.
+    """
+    _assert_requests()
+    try:
+        headers = {
+            "Authorization": f"Bearer {cfg.api_key}",
+            "Content-Type": "application/json",
+        }
+        # List base tables to locate table ID and existing fields
+        meta_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables"
+        r = requests.get(meta_url, headers=headers, timeout=30)
+        r.raise_for_status()
+        tables = (r.json() or {}).get("tables", [])
+        target = None
+        for t in tables:
+            if str(t.get("id")) == str(cfg.table_id_or_name) or str(t.get("name")) == str(cfg.table_id_or_name):
+                target = t
+                break
+        if not target:
+            return False
+
+        # Already exists?
+        existing_fields = {str(f.get("name")) for f in (target.get("fields") or [])}
+        if desired_field_name in existing_fields:
+            return True
+
+        table_id = target.get("id")
+        if not table_id:
+            return False
+
+        # Try PATCH table to add a field
+        patch_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables/{table_id}"
+        payload = {"fields": [{"name": desired_field_name, "type": field_type}]}
+        rp = requests.patch(patch_url, headers=headers, json=payload, timeout=30)
+        try:
+            rp.raise_for_status()
+            return True
+        except Exception:
+            # Fallback: attempt POST to /fields (older schema variants)
+            try:
+                post_url = f"https://api.airtable.com/v0/meta/bases/{cfg.base_id}/tables/{table_id}/fields"
+                rp2 = requests.post(post_url, headers=headers, json={"name": desired_field_name, "type": field_type}, timeout=30)
+                rp2.raise_for_status()
+                return True
+            except Exception:
+                return False
+    except Exception:
+        # If metadata API not available or any error occurs, just return False
+        return False
+
+
 def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = "Account", typecast: bool = True) -> str:
     """Upsert a single record by key_field. Returns record ID."""
     _assert_requests()
@@ -224,22 +363,39 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
         raise ValueError(f"Missing key field '{key_field}' in fields")
 
     # Clean fields: remove None and NaN values
+    def _normalize_value(v: Any) -> Any:
+        if v is None:
+            return None
+        try:
+            if isinstance(v, float) and pd.isna(v):
+                return None
+        except Exception:
+            pass
+        try:
+            import pandas as _pd
+            if isinstance(v, getattr(_pd, 'Series', ())) or str(type(v)).endswith(".Series'>"):
+                try:
+                    vals = [str(x).strip() for x in v.dropna().tolist() if str(x).strip()]
+                    return ", ".join(vals) if vals else None
+                except Exception:
+                    return str(v)
+        except Exception:
+            pass
+        if isinstance(v, (list, dict)):
+            return v
+        try:
+            if pd.isna(v):
+                return None
+        except Exception:
+            pass
+        return v
+
     clean_fields = {}
     for k, v in fields.items():
-        if v is None:
+        nv = _normalize_value(v)
+        if nv is None:
             continue
-        # Check for NaN values (float NaN)
-        if isinstance(v, float) and pd.isna(v):
-            continue
-        # Check for pandas NA (but not for lists/arrays)
-        if not isinstance(v, (list, dict)):
-            try:
-                if pd.isna(v):
-                    continue
-            except (TypeError, ValueError):
-                # pd.isna() may fail on some types, just keep the value
-                pass
-        clean_fields[k] = v
+        clean_fields[k] = nv
 
     existing = _fetch_all_by_key(cfg, key_field)
 
@@ -247,8 +403,56 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
     headers = {"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"}
 
     if key_val in existing:
-        rec_id = existing[key_val]["id"]
-        payload = {"records": [{"id": rec_id, "fields": clean_fields}], "typecast": typecast}
+        rec = existing[key_val]
+        ex_fields = rec.get('fields', {}) or {}
+        CORE_FIELDS = {
+            'Final plan',
+            'Add-ons needed',
+            'Gained by plan (not currently in project)',
+            'Approved By',
+            'Approved At',
+            'Comment',
+        }
+        def _is_empty(v: Any) -> bool:
+            if v is None:
+                return True
+            if isinstance(v, str):
+                return len(v.strip()) == 0
+            if isinstance(v, (list, dict)):
+                return len(v) == 0
+            return False
+        def _parse_ts(v: Any) -> Optional[int]:
+            if v is None:
+                return None
+            try:
+                if isinstance(v, (int, float)):
+                    return int(v)
+                s = str(v).strip()
+                if not s:
+                    return None
+                ts = pd.to_datetime(s, utc=True, errors='coerce')
+                if ts is not None and not pd.isna(ts):
+                    return int(ts.timestamp())
+            except Exception:
+                return None
+            return None
+        our_ts = _parse_ts(clean_fields.get('Approved At'))
+        ex_ts = _parse_ts(ex_fields.get('Approved At'))
+        merged: Dict[str, Any] = {}
+        for k, v in clean_fields.items():
+            if _is_empty(v):
+                continue
+            if k in CORE_FIELDS:
+                if ex_ts is not None and our_ts is not None and our_ts < ex_ts:
+                    continue
+                merged[k] = v
+            else:
+                if k in ex_fields and not _is_empty(ex_fields.get(k)):
+                    continue
+                merged[k] = v
+        if not merged:
+            return rec.get('id')
+        payload = {"records": [{"id": rec.get('id'), "fields": merged}], "typecast": typecast}
         resp = requests.patch(url, headers=headers, json=payload, timeout=30)
         try:
             resp.raise_for_status()
@@ -257,7 +461,7 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
             raise RuntimeError(
                 f"Airtable update failed: HTTP {getattr(resp, 'status_code', 'unknown')} | field keys: {list(clean_fields.keys())} | response: {details}"
             ) from e
-        return rec_id
+        return rec.get('id')
     else:
         payload = {"records": [{"fields": clean_fields}], "typecast": typecast}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)

@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 
 from src.logic import MigrationLogic
-from src.agent import ReviewAgent
 from src.decision_agent import DecisionAgent
 from src.utils import parse_feature_list
 from src.plan_definitions import get_active_plan_json, get_flat_plan_json
@@ -36,11 +35,40 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
     selected_plans = st.multiselect("Filter by Recommended Plan", plans, default=plans)
     res_filtered = res_df[res_df['Recommended Plan'].isin(selected_plans)] if selected_plans else res_df
 
-    st.dataframe(res_filtered.drop(columns=['Raw Rec']))
+    # Merge approvals into overview for on-screen display, including Approval Comment
+    try:
+        approvals_df = store.all()
+    except Exception:
+        approvals_df = pd.DataFrame()
+
+    display_df = res_filtered.drop(columns=['Raw Rec']).copy()
+    if isinstance(approvals_df, pd.DataFrame) and not approvals_df.empty:
+        field_name = (
+            'Add-ons needed' if 'Add-ons needed' in approvals_df.columns else (
+                'Extras' if 'Extras' in approvals_df.columns else None
+            )
+        )
+        base_cols = ["Account", "Final Plan", "Approved By", "Approved At"]
+        opt_cols = []
+        if field_name:
+            opt_cols.append(field_name)
+        if 'Comment' in approvals_df.columns:
+            opt_cols.append('Comment')
+        cols = [c for c in (base_cols + opt_cols) if c in approvals_df.columns]
+        if cols:
+            appr = approvals_df[cols].rename(
+                columns={
+                    (field_name or 'Extras'): 'Final Add-ons needed',
+                    'Comment': 'Approval Comment',
+                }
+            )
+            display_df = display_df.merge(appr, on='Account', how='left')
+
+    st.dataframe(display_df)
 
     # Export updated Excel (with approvals merged)
     st.markdown("\n**Export Updated Excel**")
-    approvals_df = store.all()
+    # Use approvals_df from above for export/sync
     if st.button("Generate Updated Excel"):
         try:
             bytes_xlsx = build_updated_excel_bytes(st.session_state.get('data', {}), approvals_df)
@@ -71,9 +99,20 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                 out_df = mapping_df.copy()
                 if name_col:
                     field_name = "Add-ons needed" if "Add-ons needed" in approvals_df.columns else ("Extras" if "Extras" in approvals_df.columns else None)
-                    cols = ["Account", "Final Plan"] + ([field_name] if field_name else [])
+                    base_cols = ["Account", "Final Plan", "Approved By", "Approved At"]
+                    opt_cols = []
+                    if field_name:
+                        opt_cols.append(field_name)
+                    if "Comment" in approvals_df.columns:
+                        opt_cols.append("Comment")
+                    cols = base_cols + opt_cols
                     appr = approvals_df[cols].rename(
-                        columns={"Account": name_col, "Final Plan": "Final Plan", (field_name or "Extras"): "Final Add-ons needed"}
+                        columns={
+                            "Account": name_col,
+                            "Final Plan": "Final Plan",
+                            (field_name or "Extras"): "Final Add-ons needed",
+                            "Comment": "Approval Comment",
+                        }
                     )
                     out_df = out_df.merge(appr, on=name_col, how="left")
                 write_dataframe(client, key, gs['updated_map_ws'], out_df)
@@ -126,27 +165,14 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
     except Exception:
         plan_json = get_flat_plan_json()
     logic_engine = MigrationLogic(None, plan_json, cost_bloat_weight=cost_bloat_weight)
-    agent = ReviewAgent(openai_key)
     decision_agent = DecisionAgent(openai_key)
 
     agent_col, human_col = st.columns(2)
     with agent_col:
-        if st.button("Ask Agent to Review Selection"):
-            if not openai_key:
-                st.error("Please enter an OpenAI API Key in the sidebar.")
-            else:
-                with st.spinner("Agent is analyzing..."):
-                    review = agent.review_recommendation(
-                        account_name=row['Account'],
-                        subtype=row['Sub Type'],
-                        user_features=raw_data.get('featureNames', []),
-                        recommendation=row['Raw Rec']
-                    )
-                    st.success("Agent Feedback:")
-                    st.write(review)
-
         with st.expander("AI Decision Maker", expanded=st.session_state.get('ai_decision_open', False) or (row['Account'] in st.session_state.get('ai_decisions', {}))):
             st.markdown("**AI Decision Maker**")
+            # Initialize from session so it's always defined
+            ai_decision_saved = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
             if st.button("Get AI Decision"):
                 if not openai_key:
                     st.error("Please enter an OpenAI API Key in the sidebar.")
@@ -167,84 +193,23 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                         else:
                             st.write(decision)
 
-            ai_decision_saved = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
+                    ai_decision_saved = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
             if ai_decision_saved:
                 st.markdown("Last AI Decision:")
                 st.write(ai_decision_saved.get('text', ''))
 
     # Human override / approval UI
     with human_col:
-        st.markdown("**Human Override & Approve**")
-        candidates_for_dropdown = []
-        if isinstance(row['Raw Rec'], dict):
-            candidates_for_dropdown = row['Raw Rec'].get('all_plans') or row['Raw Rec'].get('all_candidates', [])
-        plan_options = []
-        try:
-            plan_options = [c.get('plan') for c in candidates_for_dropdown if c.get('plan')]
-            plan_options = list(dict.fromkeys(plan_options))
-        except Exception:
-            plan_options = []
-
-        ai_decisions = st.session_state.get('ai_decisions', {}) or {}
-        ai_for_account = ai_decisions.get(row['Account']) if isinstance(ai_decisions, dict) else None
-        ai_plan = None
-        if isinstance(ai_for_account, dict):
-            parsed = ai_for_account.get('parsed') if isinstance(ai_for_account.get('parsed'), dict) else {}
-            ai_plan = parsed.get('plan')
-
-        target_plan = ai_plan or current_plan
-        if target_plan and target_plan not in plan_options:
-            plan_options = [target_plan] + plan_options
-
-        def _norm(s):
-            return str(s or "").strip().lower()
-
-        default_idx = 0
-        if plan_options:
-            for i, p in enumerate(plan_options):
-                if _norm(p) == _norm(target_plan):
-                    default_idx = i
-                    break
-            else:
-                for i, p in enumerate(plan_options):
-                    pn = _norm(p)
-                    tn = _norm(target_plan)
-                    if tn and (tn in pn or pn in tn):
-                        default_idx = i
-                        break
-
-        new_plan = (
-            st.selectbox("Final plan", plan_options, index=default_idx if plan_options else 0)
-            if plan_options else st.text_input("Final plan", value=current_plan, disabled=False)
-        )
-        new_extras_str = st.text_area("Final Add-ons needed (comma-separated)", value=", ".join(current_extras), height=80)
-        new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
-
-        if st.button("Save & Lock (Human Approved)"):
-            if not approved_by.strip():
-                st.error("Please enter your name in the sidebar.")
-            else:
-                try:
-                    plan_feats = set(logic_engine.plan_definitions.get(new_plan, set()))
-                    user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
-                    extras_set = set(new_extras)
-                    cls = _classify_sets(plan_feats, user_feats, extras_set)
-                except Exception:
-                    cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
-
-                details_payload = _make_details_payload(new_plan, cls, new_extras)
-                success, msg = _sync_approval_to_airtable(
-                    store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
-                )
-                if success:
-                    st.success(f"Saved and locked! {msg}")
-                    st.caption("Re-run logic to see locked status in table.")
-                else:
-                    st.warning(msg)
-
-                _autosave_exports(store)
-
-        st.markdown("---")
+        # Keep approval comments in sync per account
+        cand_key = f"approval_comment_candidate__{row['Account']}"
+        manual_key = f"approval_comment__{row['Account']}"
+        cand_val = st.session_state.get(cand_key)
+        manual_val = st.session_state.get(manual_key)
+        if (not cand_val or str(cand_val).strip() == "") and (manual_val and str(manual_val).strip() != ""):
+            st.session_state[cand_key] = manual_val
+        elif (not manual_val or str(manual_val).strip() == "") and (cand_val and str(cand_val).strip() != ""):
+            st.session_state[manual_key] = cand_val
+        # Choose from Candidates (moved above manual override)
         st.markdown("**Choose from Candidates**")
         candidates = []
         if isinstance(row['Raw Rec'], dict):
@@ -313,13 +278,17 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                 st.json(_preview_with_display_names(enriched))
             except Exception:
                 st.json(_preview_with_display_names(cand))
+            # Optional comment specific to candidate approval
+            comment_candidate = st.text_area(
+                "Approval Comment (optional)", key=f"approval_comment_candidate__{row['Account']}"
+            )
             if st.button("Approve Selected Option & Lock"):
                 if not approved_by.strip():
                     st.error("Please enter your name in the sidebar.")
                 else:
                     cand_extras = [str(x).strip() for x in cand.get('extras', [])]
                     details_payload = _make_details_payload(
-                        cand.get('plan', current_plan), cls, cand_extras
+                        cand.get('plan', current_plan), cls, cand_extras, comment=comment_candidate
                     )
                     success, msg = _sync_approval_to_airtable(
                         store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
@@ -329,6 +298,80 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     else:
                         st.warning(msg)
                     _autosave_exports(store)
+
+        st.markdown("---")
+        st.markdown("**Human Override & Approve**")
+        candidates_for_dropdown = []
+        if isinstance(row['Raw Rec'], dict):
+            candidates_for_dropdown = row['Raw Rec'].get('all_plans') or row['Raw Rec'].get('all_candidates', [])
+        plan_options = []
+        try:
+            plan_options = [c.get('plan') for c in candidates_for_dropdown if c.get('plan')]
+            plan_options = list(dict.fromkeys(plan_options))
+        except Exception:
+            plan_options = []
+
+        ai_decisions = st.session_state.get('ai_decisions', {}) or {}
+        ai_for_account = ai_decisions.get(row['Account']) if isinstance(ai_decisions, dict) else None
+        ai_plan = None
+        if isinstance(ai_for_account, dict):
+            parsed = ai_for_account.get('parsed') if isinstance(ai_for_account.get('parsed'), dict) else {}
+            ai_plan = parsed.get('plan')
+
+        target_plan = ai_plan or current_plan
+        if target_plan and target_plan not in plan_options:
+            plan_options = [target_plan] + plan_options
+
+        def _norm(s):
+            return str(s or "").strip().lower()
+
+        default_idx = 0
+        if plan_options:
+            for i, p in enumerate(plan_options):
+                if _norm(p) == _norm(target_plan):
+                    default_idx = i
+                    break
+            else:
+                for i, p in enumerate(plan_options):
+                    pn = _norm(p)
+                    tn = _norm(target_plan)
+                    if tn and (tn in pn or pn in tn):
+                        default_idx = i
+                        break
+
+        new_plan = (
+            st.selectbox("Final plan", plan_options, index=default_idx if plan_options else 0)
+            if plan_options else st.text_input("Final plan", value=current_plan, disabled=False)
+        )
+        new_extras_str = st.text_area("Final Add-ons needed (comma-separated)", value=", ".join(current_extras), height=80)
+        new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
+        # Place approval comment between extras and the Save button
+        comment_approval = st.text_area(
+            "Approval Comment (optional)", key=f"approval_comment__{row['Account']}"
+        )
+
+        if st.button("Save & Lock (Human Approved)"):
+            if not approved_by.strip():
+                st.error("Please enter your name in the sidebar.")
+            else:
+                try:
+                    plan_feats = set(logic_engine.plan_definitions.get(new_plan, set()))
+                    user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                    extras_set = set(new_extras)
+                    cls = _classify_sets(plan_feats, user_feats, extras_set)
+                except Exception:
+                    cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
+                details_payload = _make_details_payload(new_plan, cls, new_extras, comment=comment_approval)
+                success, msg = _sync_approval_to_airtable(
+                    store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
+                )
+                if success:
+                    st.success(f"Saved and locked! {msg}")
+                    st.caption("Re-run logic to see locked status in table.")
+                else:
+                    st.warning(msg)
+
+                _autosave_exports(store)
 
         st.markdown("---")
         st.markdown("**Apply AI Decision**")
@@ -359,8 +402,10 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     st.error("Please enter your name in the sidebar.")
                 else:
                     ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                    # Pull any comment provided in the manual approval area for this account
+                    comment_for_ai = st.session_state.get(f"approval_comment__{row['Account']}", "")
                     details_payload = _make_details_payload(
-                        parsed.get('plan', current_plan), cls, ai_extras
+                        parsed.get('plan', current_plan), cls, ai_extras, comment=comment_for_ai
                     )
                     success, msg = _sync_approval_to_airtable(
                         store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
@@ -370,4 +415,3 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     else:
                         st.warning(msg)
                     _autosave_exports(store)
-
