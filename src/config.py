@@ -77,7 +77,6 @@ AIRTABLE = {
 
 # Optional: other secrets commonly used in app
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
-GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 # Global Availability (GA) features — always available and not counted as extras/bloat
 GA_FEATURES = [

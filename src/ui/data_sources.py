@@ -15,27 +15,36 @@ def render():
     source = st.radio("Select data source", ["Airtable", "Excel Workbook"], index=0)
 
     if source == "Airtable":
-        # Show status and allow manual API key input
+        # Show status and only prompt for key if not provided via secrets/env
+        env_api_key = AT_CFG.get('API_KEY', '')
         env_base_id = AT_CFG.get('BASE_ID', '')
         env_table = AT_CFG.get('TABLE', '')
         env_view = AT_CFG.get('VIEW', '')
         env_cache = AT_CFG.get('CACHE_PATH', 'data/airtable_mapping.json')
 
-        st.session_state.setdefault('airtable_manual', {'api_key': AT_CFG.get('API_KEY', '')})
-        api_key = st.text_input("Airtable API Key", value=st.session_state['airtable_manual'].get('api_key', ''), type="password")
-        st.session_state['airtable_manual']['api_key'] = (api_key or '').strip()
-        st.caption("Base and table are preconfigured; enter API key if not in .env.")
+        st.session_state.setdefault('airtable_manual', {'api_key': ''})
+        api_key = env_api_key.strip()
+
+        if not api_key:
+            # Only ask if not configured via secrets/env
+            manual_val = st.session_state['airtable_manual'].get('api_key', '')
+            api_key_input = st.text_input("Airtable API Key", value=manual_val, type="password")
+            st.session_state['airtable_manual']['api_key'] = (api_key_input or '').strip()
+            api_key = (api_key_input or '').strip()
+            st.caption("Base and table are preconfigured; enter API key if not in secrets/env.")
+        else:
+            st.info("Using Airtable API key from secrets/env.")
 
         col_a, col_b = st.columns(2)
         with col_a:
-            if st.button("Save API Key"):
+            if not env_api_key and st.button("Save API Key"):
                 st.success("Saved in session. You can now load from Airtable.")
         with col_b:
             if st.button("Load from Airtable"):
                 if not api_key:
-                    st.error("Please enter an Airtable API Key.")
+                    st.error("Please configure an Airtable API Key.")
                 elif not env_base_id or not env_table:
-                    st.error("Airtable Base/Table not configured. Set in .env.")
+                    st.error("Airtable Base/Table not configured. Set in secrets/env.")
                 else:
                     try:
                         with st.spinner("Fetching from Airtable..."):

@@ -22,29 +22,12 @@ APPROVALS_TABLE = "Approvals"
 
 # Optional: used by the Agent
 OPENAI_API_KEY = "sk-..."
-
-# Optional: Google Sheets service account JSON (multiline TOML string)
-GOOGLE_SERVICE_ACCOUNT_JSON = """
-{
-  "type": "service_account",
-  "project_id": "...",
-  "private_key_id": "...",
-  "private_key": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n",
-  "client_email": "...",
-  "client_id": "...",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "..."
-}
-"""
 ```
 
 How the app reads secrets
 
 - `src/config.py` first loads `.env` (if present) for local dev via `python-dotenv`.
 - If running in Streamlit, it reads `st.secrets` (supports both top-level keys and nested `[AIRTABLE]` group):
-  - `OPENAI_API_KEY` and `GOOGLE_SERVICE_ACCOUNT_JSON` at the top level
+  - `OPENAI_API_KEY` at the top level
   - `AIRTABLE.API_KEY`, `AIRTABLE.BASE_ID`, `AIRTABLE.TABLE`, `AIRTABLE.VIEW`, `AIRTABLE.CACHE_PATH`, `AIRTABLE.APPROVALS_TABLE`
 - The app code prefers Streamlit secrets over OS env variables automatically, so no code changes are required when deploying.
-

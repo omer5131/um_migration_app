@@ -115,13 +115,16 @@ def main():
 
     # Sidebar Airtable status moved into Data Sources renderer
 
-    openai_key_input = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
-    # Fallback to Streamlit secrets if input is empty
+    # Only prompt for OpenAI key if not provided via secrets/env
     try:
         from src.config import OPENAI_API_KEY as _OA
     except Exception:
         _OA = ""
-    openai_key = openai_key_input or _OA
+    if _OA:
+        openai_key = _OA
+        st.sidebar.caption("Using OpenAI API key from secrets/env.")
+    else:
+        openai_key = st.sidebar.text_input("OpenAI API Key (for Agent)", type="password")
     approved_by = st.sidebar.text_input("Your Name (for approvals)")
     use_ai_bulk = st.sidebar.checkbox("Use AI for recommendations (beta)", value=False)
     paid_bloat_penalty = st.sidebar.slider(
@@ -229,7 +232,7 @@ def main():
         st.stop()
         st.subheader("Connect Data Sources")
         # Make Airtable the first and default option
-        source = st.radio("Select data source", ["Airtable", "Excel Workbook", "CSV Files (default)", "Google Sheets"], index=0)
+        source = st.radio("Select data source", ["Airtable", "Excel Workbook", "CSV Files (default)"], index=0)
 
         if source == "Excel Workbook":
             upl = st.file_uploader("Upload Excel file (.xlsx)", type=["xlsx"])
@@ -263,58 +266,6 @@ def main():
                     st.success("CSV data loaded.")
         elif source == "SQLite (local)":
             st.info("SQLite option is disabled.")
-        elif source == "Google Sheets":
-            st.write("Provide Google Sheets URL(s) and Service Account JSON.")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                default_url = "https://docs.google.com/spreadsheets/d/12uSZdBwdR_RrbxTW7xrx0yuf9idXVEHIgjQ2nLm-KCE/edit?gid=1389810451"
-                sheet_url = st.text_input("Google Sheet URL (auto-detected)", value=default_url)
-                map_ws = st.text_input("Mapping Worksheet Name", value="Account Migration mapping (9)")
-                approvals_ws = st.text_input("Approvals Worksheet Name (write-back)", value="Approvals")
-                updated_map_ws = st.text_input("Updated Mapping Sheet (write-back)", value="Account<>CSM<>Project (updated)")
-                enable_write = st.checkbox("Enable write-back to Google Sheet", value=True,
-                                           help="Service Account must have edit access to this spreadsheet.")
-            with col_b:
-                creds_json = st.text_area("Service Account JSON", height=220)
-
-            if st.button("Connect & Load Sheets"):
-                # Allow fallback to Streamlit secrets without exposing the content
-                effective_creds = creds_json.strip()
-                if not effective_creds:
-                    try:
-                        from src.config import GOOGLE_SERVICE_ACCOUNT_JSON as _GS
-                        effective_creds = _GS.strip()
-                    except Exception:
-                        effective_creds = ""
-                if not effective_creds:
-                    st.error("Service Account JSON is required (paste it here or set GOOGLE_SERVICE_ACCOUNT_JSON in secrets).")
-                else:
-                    try:
-                        client = make_client(effective_creds)
-                        key = extract_key_from_url(sheet_url)
-                        if not key:
-                            st.error("Could not extract spreadsheet key from the URL.")
-                        else:
-                            sheets_cfg = {
-                                'mapping': {"spreadsheet_key": key, "worksheet": map_ws},
-                            }
-                            data = load_from_sheets(client, sheets_cfg)
-                            # Keep connection details for later write-back
-                            st.session_state["gsheets"] = {
-                                'client': client,
-                                'spreadsheet_key': key,
-                                'mapping_ws': map_ws,
-                                'approvals_ws': approvals_ws,
-                                'updated_map_ws': updated_map_ws,
-                                'enable_write': enable_write,
-                            }
-                            # Annotate source
-                            data['_source'] = f"gsheets:{map_ws}"
-                            st.session_state["data"] = data
-                            st.success("Sheets data loaded.")
-                    except Exception as e:
-                        st.error(f"Sheets error: {e}")
-
         else:  # Airtable
             from src.config import AIRTABLE as AT
             from src.data_loader import load_from_airtable

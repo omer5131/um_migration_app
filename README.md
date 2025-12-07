@@ -12,7 +12,6 @@ This application automates the mapping of existing customer accounts to a new "P
 
 2.  **Data Files / Sources:**
     - CSV/Excel: You can continue to load local files.
-    - Google Sheets: Use the UI to provide a URL and service account JSON.
     - Airtable (recommended & default): Configure environment variables and sync to a persistent cache. The app auto-loads from Airtable on startup; the Data Sources tab hides if this succeeds. Other sources only appear if Airtable fails.
       - Copy `config/.env.example` to `.env` (or export env vars in your shell) and set:
         - `AIRTABLE_API_KEY`, `AIRTABLE_BASE_ID`, `AIRTABLE_TABLE`, optional `AIRTABLE_VIEW`, and `AIRTABLE_CACHE_PATH`.
@@ -57,7 +56,6 @@ APPROVALS_TABLE = "Approvals"
 
 # Optional
 OPENAI_API_KEY = "sk-..."
-GOOGLE_SERVICE_ACCOUNT_JSON = """{ ...service account json... }"""
 ```
 
 The app automatically prefers `st.secrets` over OS env vars (see `src/config.py`), so deployment requires no code changes.
