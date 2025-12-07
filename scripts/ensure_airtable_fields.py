@@ -8,6 +8,8 @@ from typing import List
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from src.airtable import AirtableConfig, ensure_field_exists, fetch_records
+from src.config import AIRTABLE as AT_CFG
+from src.utils.airtable_client import get_airtable_cfg
 
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -17,21 +19,19 @@ except Exception:
 
 
 def main() -> int:
-    api_key = os.getenv("AIRTABLE_API_KEY", "").strip()
-    base_id = os.getenv("AIRTABLE_BASE_ID", "").strip()
-    table_id = os.getenv("AIRTABLE_APPROVALS_TABLE", "").strip() or os.getenv("AIRTABLE_TABLE", "").strip()
-
-    if not api_key:
-        print("ERROR: AIRTABLE_API_KEY is not set in environment.", file=sys.stderr)
-        return 2
-    if not base_id:
-        print("ERROR: AIRTABLE_BASE_ID is not set in environment.", file=sys.stderr)
-        return 2
-    if not table_id:
-        print("ERROR: AIRTABLE_APPROVALS_TABLE (or AIRTABLE_TABLE) is not set in environment.", file=sys.stderr)
-        return 2
-
-    cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
+    # Prefer Streamlit secrets via src.config; fallback to env
+    cfg = get_airtable_cfg("approvals") or get_airtable_cfg("table")
+    if not cfg:
+        api_key = os.getenv("AIRTABLE_API_KEY", AT_CFG.get("API_KEY", "")).strip()
+        base_id = os.getenv("AIRTABLE_BASE_ID", AT_CFG.get("BASE_ID", "")).strip()
+        table_id = (
+            os.getenv("AIRTABLE_APPROVALS_TABLE", AT_CFG.get("APPROVALS_TABLE", "")).strip()
+            or os.getenv("AIRTABLE_TABLE", AT_CFG.get("TABLE", "")).strip()
+        )
+        if not api_key or not base_id or not table_id:
+            print("ERROR: Missing Airtable config. Set in Streamlit secrets [airtable] or env vars.", file=sys.stderr)
+            return 2
+        cfg = AirtableConfig(api_key=api_key, base_id=base_id, table_id_or_name=table_id)
 
     # Fields we expect for full sync with the Recommendations & Agent page naming
     desired_fields: List[str] = [

@@ -22,18 +22,37 @@ FILES = {
 }
 
 # Airtable configuration (read from env). Used to sync mapping table to a cached file.
-def _from_secrets(name: str, default: str = "") -> str:
-    # First check top-level, then nested groups (e.g., AIRTABLE.API_KEY)
+def _from_secrets(name: str, default: str | None = ""):
+    """Resolve a value from Streamlit secrets with flexible casing.
+
+    Supports both top-level keys and grouped keys, e.g.:
+    - AIRTABLE_API_KEY
+    - group/key forms like (AIRTABLE, API_KEY) or (airtable, api_key)
+    """
+    # Direct lookup first
     if name in SECRETS:
         val = SECRETS.get(name, default)
         return val.strip() if isinstance(val, str) else val
-    # Resolve group and key when using NAME like AIRTABLE_API_KEY
-    if "_" in name:
+
+    # Try dot-notation as a fallback (e.g., AIRTABLE.API_KEY)
+    grp = key = None
+    if "." in name:
+        grp, key = name.split(".", 1)
+    elif "_" in name:
+        # Split once: AIRTABLE_API_KEY -> (AIRTABLE, API_KEY)
         grp, key = name.split("_", 1)
-        group = SECRETS.get(grp) if isinstance(SECRETS.get(grp), dict) else None
-        if group and key in group:
-            val = group.get(key, default)
-            return val.strip() if isinstance(val, str) else val
+
+    if grp and key:
+        # Consider common casings for group and key
+        grp_candidates = [grp, grp.upper(), grp.lower(), grp.capitalize()]
+        key_candidates = [key, key.upper(), key.lower(), key.capitalize()]
+        for g in grp_candidates:
+            group = SECRETS.get(g)
+            if isinstance(group, dict):
+                for k in key_candidates:
+                    if k in group:
+                        val = group.get(k, default)
+                        return val.strip() if isinstance(val, str) else val
     return default
 
 

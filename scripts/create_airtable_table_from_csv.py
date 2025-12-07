@@ -15,6 +15,7 @@ except Exception:
 import pathlib
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from src.migration.schema import AirtableAuth, create_table_from_csv
+from src.config import AIRTABLE as CFG
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
@@ -29,10 +30,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
 
-    api_key = os.getenv("AIRTABLE_API_KEY", "").strip()
-    base_id = os.getenv("AIRTABLE_BASE_ID", "").strip()
+    api_key = (os.getenv("AIRTABLE_API_KEY", CFG.get("API_KEY", "")) or "").strip()
+    base_id = (os.getenv("AIRTABLE_BASE_ID", CFG.get("BASE_ID", "")) or "").strip()
     if not api_key or not base_id:
-        print("ERROR: Set AIRTABLE_API_KEY and AIRTABLE_BASE_ID in your environment.", file=sys.stderr)
+        print("ERROR: Missing Airtable config. Use Streamlit secrets [airtable] or env vars.", file=sys.stderr)
         return 2
 
     table_name = (args.table or "Approvals").strip()

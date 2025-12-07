@@ -15,6 +15,7 @@ except Exception:
     pass
 
 from src.migration.airtable_sync import AirtableAuth, get_table_fields
+from src.config import AIRTABLE as CFG
 
 
 def normalize_name(s: str) -> str:
@@ -59,13 +60,13 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
-
-    api_key = os.getenv("AIRTABLE_API_KEY", "").strip()
-    base_id = os.getenv("AIRTABLE_BASE_ID", "").strip()
-    table = (args.table or os.getenv("AIRTABLE_TABLE", "")).strip()
+    # Prefer Streamlit secrets/config, override with env if present
+    api_key = (os.getenv("AIRTABLE_API_KEY", CFG.get("API_KEY", "")) or "").strip()
+    base_id = (os.getenv("AIRTABLE_BASE_ID", CFG.get("BASE_ID", "")) or "").strip()
+    table = (args.table or os.getenv("AIRTABLE_TABLE", CFG.get("TABLE", "")) or "").strip()
 
     if not api_key or not base_id or not table:
-        print("ERROR: Set AIRTABLE_API_KEY, AIRTABLE_BASE_ID and provide --table or set AIRTABLE_TABLE", file=sys.stderr)
+        print("ERROR: Missing Airtable config. Use Streamlit secrets [airtable] or env vars, and provide --table if needed.", file=sys.stderr)
         return 2
 
     auth = AirtableAuth(api_key=api_key, base_id=base_id)
@@ -85,4 +86,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
