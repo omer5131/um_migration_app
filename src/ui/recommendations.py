@@ -46,13 +46,15 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
     if 'name' not in df.columns and 'SalesForce_Account_NAME' in df.columns:
         df = df.rename(columns={'SalesForce_Account_NAME': 'name'})
 
-    csm_col = next((c for c in df.columns if 'csm' in c.lower()), None)
+    # Be defensive: DataFrame columns may be non-strings; normalize for matching
+    cols_norm = {c: str(c).lower() for c in df.columns}
+    csm_col = next((col for col, lc in cols_norm.items() if 'csm' in lc), None)
     subtype_col = (
         'Sub Type' if 'Sub Type' in df.columns else
         ('Subtype' if 'Subtype' in df.columns else
-         next((c for c in df.columns if 'sub' in c.lower() and 'type' in c.lower()), None))
+         next((col for col, lc in cols_norm.items() if ('sub' in lc and 'type' in lc)), None))
     )
-    segment_col = next((c for c in df.columns if 'segment' in c.lower()), None)
+    segment_col = next((col for col, lc in cols_norm.items() if 'segment' in lc), None)
 
     st.markdown("**Filters (pre-run):**")
     fcols = st.columns(3)
@@ -75,7 +77,8 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
         else:
             selected_segments = None
 
-    mask = pd.Series([True] * len(df))
+    # Ensure index alignment to avoid unalignable boolean indexing errors
+    mask = pd.Series([True] * len(df), index=df.index)
     if selected_csms is not None:
         mask &= df[csm_col].isin(selected_csms)
     if selected_subtypes is not None:

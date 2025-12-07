@@ -1,5 +1,5 @@
-Account,Sub Type,Final Plan,Add-ons needed,Approved By,Approved At,plan,add-ons to compatability,features on the house,bloat_costly,gaFeatures,GA present in account,GA will appear with plan,irrelevantFeatures,Gained by plan (not currently in project),Comment
+Account,Sub Type,Final Plan,Add-ons needed,Approved By,Approved At,plan,features on the house,bloat_costly,gaFeatures,GA present in account,GA will appear with plan,irrelevantFeatures,Gained by plan (not currently in project),Comment
 "LITASCO S.A.
-",Commodity Trader,Commodity Trader Core,"riskRanking, Companies Add-on, UBO",Omer,1765120173,Commodity Trader Core,,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideBorderSecurityRisk"", ""hideMapModule"", ""hideSafetyRisk""]}",Omer check
+",Commodity Trader,Commodity Trader Core,"riskRanking, Companies Add-on, UBO",Omer,1765120173,Commodity Trader Core,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideBorderSecurityRisk"", ""hideMapModule"", ""hideSafetyRisk""]}",Omer check
 "Arte Bunkering
-",Bunkering,Bunkering Core,"nasExportMediumCsv, newAdvancedSearch, organizationDefinedRisk, sendHeartbeat, Companies Add-on, MAI Expert, UBO, Wet Cargo, STS Classification",Omer,1765120257,Bunkering Core,,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideMapModule""]}",Omer Check
+",Bunkering,Bunkering Core,"nasExportMediumCsv, newAdvancedSearch, organizationDefinedRisk, sendHeartbeat, Companies Add-on, MAI Expert, UBO, Wet Cargo, STS Classification",Omer,1765120257,Bunkering Core,,[],,,,,"{""Granted by GA"": [""weatherLayer""], ""Final plan"": [""hideMapModule""]}",Omer Check
