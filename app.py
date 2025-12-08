@@ -1182,8 +1182,15 @@ def main():
                             # Use merged extras from candidate (already includes Applied Add-on Plans)
                             cand_extras_all = [str(x).strip() for x in cand.get('extras', []) if str(x).strip()]
                             # Build detailed analytics payload for Airtable/CSV
+                            # Prefer candidate inputs; fall back to manual inputs if blanks
+                            _cm = (comment_candidate or "").strip()
+                            if not _cm:
+                                _cm = (st.session_state.get("comment_manual_lock") or "").strip()
+                            _ut = (under_trial_candidate or "").strip()
+                            if not _ut:
+                                _ut = (st.session_state.get("under_trial_manual_lock") or "").strip()
                             details_payload = _make_details_payload(
-                                cand.get('plan', current_plan), cls, cand_extras_all, comment=comment_candidate, under_trial=under_trial_candidate
+                                cand.get('plan', current_plan), cls, cand_extras_all, comment=_cm, under_trial=_ut
                             )
                             success, msg = _sync_approval_to_airtable(
                                 store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras_all, approved_by.strip(), details=details_payload
@@ -1239,8 +1246,15 @@ def main():
                             except Exception:
                                 applied_addon_plans = []
                             ai_extras_all = [x for x in (applied_addon_plans + ai_extras) if str(x).strip()]
+                            # Carry over any typed comment/under-trial (prefer manual, else candidate inputs)
+                            _cm_ai = (st.session_state.get("comment_manual_lock") or "").strip()
+                            if not _cm_ai:
+                                _cm_ai = (st.session_state.get("comment_approve_candidate") or "").strip()
+                            _ut_ai = (st.session_state.get("under_trial_manual_lock") or "").strip()
+                            if not _ut_ai:
+                                _ut_ai = (st.session_state.get("under_trial_approve_candidate") or "").strip()
                             details_payload = _make_details_payload(
-                                parsed.get('plan', current_plan), cls, ai_extras_all
+                                parsed.get('plan', current_plan), cls, ai_extras_all, comment=_cm_ai, under_trial=_ut_ai
                             )
                             if applied_addon_plans:
                                 details_payload['Applied Add-on Plans'] = applied_addon_plans

@@ -5,41 +5,75 @@ import streamlit as st
 
 from src.ui.helpers import get_airtable_config
 from src.airtable import AirtableConfig, fetch_records, records_to_dataframe
+from src.config import AIRTABLE_SYNC_INTERVAL_SECONDS
+
+
+def _start_background_airtable_sync(store, cfg: dict, interval_seconds: int) -> None:
+    """Start a background daemon thread that periodically syncs approvals to Airtable.
+
+    Runs without Streamlit UI calls to avoid interfering with the user.
+    Guarded so it starts only once per session.
+    """
+    try:
+        import threading
+        import time
+
+        if interval_seconds is None or interval_seconds <= 0:
+            return
+
+        # Ensure single start per session
+        key_started = 'airtable_bg_sync_started'
+        if getattr(st.session_state, key_started, False):
+            return
+
+        def _loop():
+            # Snapshot credentials for the thread's lifetime
+            api_key = cfg.get('api_key')
+            base_id = cfg.get('base_id')
+            approvals_table = cfg.get('approvals_table')
+            while True:
+                try:
+                    # Best-effort sync; avoid Streamlit APIs in background thread
+                    store.sync_to_airtable(api_key, base_id, approvals_table, backup=True)
+                except Exception:
+                    # Swallow errors to keep the loop alive
+                    pass
+                time.sleep(interval_seconds)
+
+        t = threading.Thread(target=_loop, name="airtable-bg-sync", daemon=True)
+        t.start()
+        st.session_state[key_started] = True
+    except Exception:
+        # Fail silently if background thread cannot start
+        pass
 
 
 def render(store):
     st.subheader("Approved")
 
     airtable_config = get_airtable_config()
+    # Fire-and-forget background sync to Airtable without blocking UI
+    if airtable_config:
+        _start_background_airtable_sync(store, airtable_config, AIRTABLE_SYNC_INTERVAL_SECONDS)
     # Default to local view so recent approvals (with merged add-ons) appear immediately
     show_local = st.checkbox("Show only local approvals (skip Airtable)", value=True)
 
     # Manual sync to Airtable to avoid waiting on deferred background sync
     if airtable_config:
-        col_sync_a, col_sync_b = st.columns(2)
-        with col_sync_a:
-            if st.button("Sync approvals to Airtable now"):
-                try:
-                    cfg = airtable_config
-                    with st.spinner("Syncing to Airtable..."):
-                        ok, msg, created, updated = store.sync_to_airtable(
-                            cfg['api_key'], cfg['base_id'], cfg['approvals_table'], backup=True
-                        )
-                    st.session_state.pop('approvals_df_cached', None)
-                    if ok:
-                        st.success(f"Airtable sync complete: {created} created, {updated} updated")
-                    else:
-                        st.warning(msg)
-                except Exception as e:
-                    st.warning(f"Airtable sync error: {e}")
-        with col_sync_b:
-            if st.button("Reload approvals from Airtable"):
+        if st.button("Sync approvals to Airtable now"):
+            try:
+                cfg = airtable_config
+                with st.spinner("Syncing to Airtable..."):
+                    ok, msg, created, updated = store.sync_to_airtable(
+                        cfg['api_key'], cfg['base_id'], cfg['approvals_table'], backup=True
+                    )
                 st.session_state.pop('approvals_df_cached', None)
-                try:
-                    st.rerun()
-                except Exception:
-                    # Fallback for older Streamlit versions
-                    pass
+                if ok:
+                    st.success(f"Airtable sync complete: {created} created, {updated} updated")
+                else:
+                    st.warning(msg)
+            except Exception as e:
+                st.warning(f"Airtable sync error: {e}")
 
     try:
         if show_local:

@@ -49,6 +49,16 @@ AIRTABLE = {
     "APPROVALS_TABLE": _getenv("AIRTABLE_APPROVALS_TABLE", "tblWWegam2OOTYpv3"),
 }
 
+# Background sync interval (seconds) for approvals -> Airtable
+# Set via env AIRTABLE_SYNC_INTERVAL_SECONDS; defaults to 300s (5 minutes)
+def _to_int(val: str, default: int) -> int:
+    try:
+        return int(str(val).strip())
+    except Exception:
+        return default
+
+AIRTABLE_SYNC_INTERVAL_SECONDS: int = _to_int(_getenv("AIRTABLE_SYNC_INTERVAL_SECONDS", "300"), 300)
+
 # Optional: other secrets commonly used in app
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
 GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
