@@ -36,6 +36,8 @@ def build_updated_excel_bytes(data: Dict, approvals_df: pd.DataFrame) -> bytes:
                 opt_cols.append(field_name)
             if "Comment" in approvals_df.columns:
                 opt_cols.append("Comment")
+            if "Under trial" in approvals_df.columns:
+                opt_cols.append("Under trial")
             cols = base_cols + opt_cols
             appr = approvals_df[cols].rename(
                 columns={

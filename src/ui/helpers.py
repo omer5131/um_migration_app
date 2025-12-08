@@ -113,7 +113,13 @@ def classify_sets(plan_feats: set[str], user_feats: set[str], extras_set: set[st
     }
 
 
-def make_details_payload(plan_name: str, cls: dict, extras_list: List[str], comment: str | None = None) -> dict:
+def make_details_payload(
+    plan_name: str,
+    cls: dict,
+    extras_list: List[str],
+    comment: str | None = None,
+    under_trial: str | None = None,
+) -> dict:
     # Normalize extras list defensively (handle pandas Series or comma-separated string)
     try:
         import pandas as _pd  # optional
@@ -148,6 +154,9 @@ def make_details_payload(plan_name: str, cls: dict, extras_list: List[str], comm
     }
     if comment is not None and str(comment).strip():
         payload['Comment'] = str(comment).strip()
+    if under_trial is not None and str(under_trial).strip():
+        # Keep Airtable/CSV header label exactly as specified
+        payload['Under trial'] = str(under_trial).strip()
     return payload
 
 

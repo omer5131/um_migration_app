@@ -13,46 +13,20 @@ try:
 except Exception:
     SECRETS = {}
 
-# File Mappings
-FILES = {
-    "accounts": "Account Migration mapping (4).xlsx - Accounts.csv",
-    "account_csm_project": "Account Migration mapping (4).xlsx - Account<>CSM<>Project.csv",
-    # Plan mapping is hard-coded in src/plan_definitions.py; no Plan <> FF file needed.
-    "pricing_data": "New T&S Pricing - July 2025 (2).xlsx"
-}
 
 # Airtable configuration (read from env). Used to sync mapping table to a cached file.
-def _from_secrets(name: str, default: str | None = ""):
-    """Resolve a value from Streamlit secrets with flexible casing.
-
-    Supports both top-level keys and grouped keys, e.g.:
-    - AIRTABLE_API_KEY
-    - group/key forms like (AIRTABLE, API_KEY) or (airtable, api_key)
-    """
-    # Direct lookup first
+def _from_secrets(name: str, default: str = "") -> str:
+    # First check top-level, then nested groups (e.g., AIRTABLE.API_KEY)
     if name in SECRETS:
         val = SECRETS.get(name, default)
         return val.strip() if isinstance(val, str) else val
-
-    # Try dot-notation as a fallback (e.g., AIRTABLE.API_KEY)
-    grp = key = None
-    if "." in name:
-        grp, key = name.split(".", 1)
-    elif "_" in name:
-        # Split once: AIRTABLE_API_KEY -> (AIRTABLE, API_KEY)
+    # Resolve group and key when using NAME like AIRTABLE_API_KEY
+    if "_" in name:
         grp, key = name.split("_", 1)
-
-    if grp and key:
-        # Consider common casings for group and key
-        grp_candidates = [grp, grp.upper(), grp.lower(), grp.capitalize()]
-        key_candidates = [key, key.upper(), key.lower(), key.capitalize()]
-        for g in grp_candidates:
-            group = SECRETS.get(g)
-            if isinstance(group, dict):
-                for k in key_candidates:
-                    if k in group:
-                        val = group.get(k, default)
-                        return val.strip() if isinstance(val, str) else val
+        group = SECRETS.get(grp) if isinstance(SECRETS.get(grp), dict) else None
+        if group and key in group:
+            val = group.get(key, default)
+            return val.strip() if isinstance(val, str) else val
     return default
 
 
@@ -77,6 +51,7 @@ AIRTABLE = {
 
 # Optional: other secrets commonly used in app
 OPENAI_API_KEY = _getenv("OPENAI_API_KEY", "")
+GOOGLE_SERVICE_ACCOUNT_JSON = _getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
 
 # Global Availability (GA) features — always available and not counted as extras/bloat
 GA_FEATURES = [
@@ -97,6 +72,9 @@ GA_FEATURES = [
     "uncertaintyArea",
     "grayFleetVOI",
     "userAlreadyLoggedInWarning",
+    "sendHeartbeat",
+    "complianceMode",
+    "complianceLabel"
 ]
 
 # Irrelevant features — ignored in comparisons and not counted toward extras/bloat/GA/missing
@@ -139,3 +117,11 @@ EXTRA_COST_WEIGHT = 0
 
 # Additional weight applied when high-cost features appear in BLOAT (we can't give these for free)
 EXTRA_COST_BLOAT_WEIGHT = 100
+
+# Default file locations (can be overridden via env vars)
+FILES = {
+    # Optional accounts CSV; data_loader falls back gracefully if missing
+    "accounts": _getenv("ACCOUNTS_CSV_PATH", os.path.join("data", "accounts.csv")),
+    # Approvals CSV handled by persistence; exposed here for convenience/consistency
+    "approvals": _getenv("APPROVALS_CSV_PATH", os.path.join("data", "approvals.csv")),
+}

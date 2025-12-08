@@ -45,7 +45,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             auth,
             table_name=table_name,
             primary_field=args.primary_field,
-            multiline_fields=["Comment", "Gained by plan (not currently in project)"],
+            multiline_fields=["Comment", "Under trial", "Gained by plan (not currently in project)"],
             dry_run=args.dry_run,
         )
     except Exception as e:

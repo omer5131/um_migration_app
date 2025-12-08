@@ -43,6 +43,7 @@ def main() -> int:
         "Approved By",
         "Approved At",
         "Comment",
+        "Under trial",
         # Optional analytics columns that may appear in CSV
         "bloat_costly",
         "irrelevantFeatures",

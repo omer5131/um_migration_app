@@ -317,7 +317,7 @@ class ApprovalsStore:
             # but keep this for context and potential future filtering if needed.
             basic_fields = {
                 'Account', 'Sub Type', 'Final Plan', 'Add-ons needed', 'Gained by plan (not currently in project)',
-                'Approved By', 'Approved At', 'Comment'
+                'Approved By', 'Approved At', 'Comment', 'Under trial'
             }
 
             # Detect existing field names in Airtable by sampling records

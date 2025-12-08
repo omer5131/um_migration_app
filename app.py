@@ -1016,6 +1016,7 @@ def main():
                     height=80,
                 )
                 comment_manual = st.text_area("Approval Comment (optional)", key="comment_manual_lock")
+                under_trial_manual = st.text_area("Under trial (optional)", key="under_trial_manual_lock")
                 new_extras = [x.strip() for x in new_extras_str.split(',') if x.strip()]
 
                 # Live preview matching candidate preview: merge applied add-on plans into extras
@@ -1071,7 +1072,9 @@ def main():
                             applied_addon_plans = []
                         combined_extras = [x for x in (applied_addon_plans + list(new_extras)) if str(x).strip()]
 
-                        details_payload = _make_details_payload(new_plan, cls, combined_extras, comment=comment_manual)
+                        details_payload = _make_details_payload(
+                            new_plan, cls, combined_extras, comment=comment_manual, under_trial=under_trial_manual
+                        )
                         # Also include Applied Add-on Plans explicitly for Airtable/CSV analytics
                         if applied_addon_plans:
                             details_payload['Applied Add-on Plans'] = applied_addon_plans
@@ -1169,6 +1172,7 @@ def main():
                     except Exception:
                         st.json(_preview_with_display_names(cand))
                     comment_candidate = st.text_area("Approval Comment (optional)", key="comment_approve_candidate")
+                    under_trial_candidate = st.text_area("Under trial (optional)", key="under_trial_approve_candidate")
                     st.caption("Saves the selected Candidate's plan and a merged 'Add-ons needed' (extras + Applied Add-on Plans).")
                     if st.button("Approve Selected Option & Lock", key="btn_approve_candidate"):
                         if not approved_by.strip():
@@ -1179,7 +1183,7 @@ def main():
                             cand_extras_all = [str(x).strip() for x in cand.get('extras', []) if str(x).strip()]
                             # Build detailed analytics payload for Airtable/CSV
                             details_payload = _make_details_payload(
-                                cand.get('plan', current_plan), cls, cand_extras_all, comment=comment_candidate
+                                cand.get('plan', current_plan), cls, cand_extras_all, comment=comment_candidate, under_trial=under_trial_candidate
                             )
                             success, msg = _sync_approval_to_airtable(
                                 store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras_all, approved_by.strip(), details=details_payload

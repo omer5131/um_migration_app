@@ -193,6 +193,7 @@ def upsert_dataframe(cfg: AirtableConfig, df: pd.DataFrame, key_field: str = "Ac
         'Approved By',
         'Approved At',
         'Comment',
+        'Under trial',
     }
     # Always update these fields regardless of timestamp guards
     ALWAYS_UPDATE_FIELDS = {
@@ -523,6 +524,7 @@ def upsert_single(cfg: AirtableConfig, fields: Dict[str, Any], key_field: str = 
             'Approved By',
             'Approved At',
             'Comment',
+            'Under trial',
         }
         def _is_empty(v: Any) -> bool:
             if v is None:

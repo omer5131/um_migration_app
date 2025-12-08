@@ -53,6 +53,8 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
             opt_cols.append(field_name)
         if 'Comment' in approvals_df.columns:
             opt_cols.append('Comment')
+        if 'Under trial' in approvals_df.columns:
+            opt_cols.append('Under trial')
         cols = [c for c in (base_cols + opt_cols) if c in approvals_df.columns]
         if cols:
             appr = approvals_df[cols].rename(
@@ -175,6 +177,15 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
             st.session_state[cand_key] = manual_val
         elif (not manual_val or str(manual_val).strip() == "") and (cand_val and str(cand_val).strip() != ""):
             st.session_state[manual_key] = cand_val
+        # Keep 'Under trial' text in sync between candidate/manual areas
+        ut_cand_key = f"under_trial_candidate__{row['Account']}"
+        ut_manual_key = f"under_trial__{row['Account']}"
+        ut_cand_val = st.session_state.get(ut_cand_key)
+        ut_manual_val = st.session_state.get(ut_manual_key)
+        if (not ut_cand_val or str(ut_cand_val).strip() == "") and (ut_manual_val and str(ut_manual_val).strip() != ""):
+            st.session_state[ut_cand_key] = ut_manual_val
+        elif (not ut_manual_val or str(ut_manual_val).strip() == "") and (ut_cand_val and str(ut_cand_val).strip() != ""):
+            st.session_state[ut_manual_key] = ut_cand_val
         # Choose from Candidates (moved above manual override)
         st.markdown("**Choose from Candidates**")
         candidates = []
@@ -251,9 +262,12 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                 st.json(_preview_with_display_names(enriched))
             except Exception:
                 st.json(_preview_with_display_names(cand))
-            # Optional comment specific to candidate approval
+            # Optional comment and under-trial strings specific to candidate approval
             comment_candidate = st.text_area(
                 "Approval Comment (optional)", key=f"approval_comment_candidate__{row['Account']}"
+            )
+            under_trial_candidate = st.text_area(
+                "Under trial (optional)", key=f"under_trial_candidate__{row['Account']}"
             )
             if st.button("Approve Selected Option & Lock"):
                 if not approved_by.strip():
@@ -261,7 +275,7 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                 else:
                     cand_extras = [str(x).strip() for x in cand.get('extras', [])]
                     details_payload = _make_details_payload(
-                        cand.get('plan', current_plan), cls, cand_extras, comment=comment_candidate
+                        cand.get('plan', current_plan), cls, cand_extras, comment=comment_candidate, under_trial=under_trial_candidate
                     )
                     success, msg = _sync_approval_to_airtable(
                         store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
@@ -322,6 +336,9 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
         comment_approval = st.text_area(
             "Approval Comment (optional)", key=f"approval_comment__{row['Account']}"
         )
+        under_trial_approval = st.text_area(
+            "Under trial (optional)", key=f"under_trial__{row['Account']}"
+        )
 
         if st.button("Save & Lock (Human Approved)"):
             if not approved_by.strip():
@@ -334,7 +351,9 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     cls = _classify_sets(plan_feats, user_feats, extras_set)
                 except Exception:
                     cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
-                details_payload = _make_details_payload(new_plan, cls, new_extras, comment=comment_approval)
+                details_payload = _make_details_payload(
+                    new_plan, cls, new_extras, comment=comment_approval, under_trial=under_trial_approval
+                )
                 success, msg = _sync_approval_to_airtable(
                     store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
                 )
@@ -383,8 +402,9 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
                     # Pull any comment provided in the manual approval area for this account
                     comment_for_ai = st.session_state.get(f"approval_comment__{row['Account']}", "")
+                    under_trial_for_ai = st.session_state.get(f"under_trial__{row['Account']}", "")
                     details_payload = _make_details_payload(
-                        parsed.get('plan', current_plan), cls, ai_extras, comment=comment_for_ai
+                        parsed.get('plan', current_plan), cls, ai_extras, comment=comment_for_ai, under_trial=under_trial_for_ai
                     )
                     success, msg = _sync_approval_to_airtable(
                         store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
