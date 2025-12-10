@@ -167,7 +167,7 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      
+      "nasAddVesselsToVoi",
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
@@ -193,7 +193,7 @@
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
-      
+      "nasAddVesselsToVoi",
       "visualLinkAnalysis",
       
       
@@ -223,9 +223,6 @@
       "nasAddVesselsToVoi",
       "savedQueriesNotifications",
       "portStateControl",
-      
-      
-      
       "hideMapModule",
       "companyProfile",
       "exploreCompanies",
