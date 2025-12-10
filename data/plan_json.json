@@ -3,14 +3,9 @@
     "Shipowners Core": [
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
       "liveChat",
       "complianceLabel",
-      
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
       "hideMapModule",
       "portProfile"
     ],
@@ -19,19 +14,19 @@
       "newAdvancedSearch",
       "savedQueriesNotifications",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "advancedSearchOwners",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
-      "mapMarkers",
+      
+      
+      
       "nasAddVesselsToVoi",
-      "nasTransmissionInAreaActivityType",
+      
       "newNasSideBarDesign",
       "portProfile",
       "companyProfile",
@@ -50,22 +45,22 @@
       
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "advancedSearchOwners",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
-      "mapMarkers",
+      
       "nasAddVesselsToVoi",
-      "nasTransmissionInAreaActivityType",
+      
       "newNasSideBarDesign",
       "portProfile",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "uboData",
-      "weatherLayer",
+      
       "newNotificationUI",
       "wetCargoData"
     ]
@@ -75,15 +70,15 @@
     "Bunkering Core": [
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
+      
       "hideMapTimelineOnVesselProfile",
       "hideMapModule",
       "stsClassification",
@@ -93,19 +88,19 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "advancedSearchOwners",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
-      "mapMarkers",
+      
+      
+      
       "nasAddVesselsToVoi",
-      "nasTransmissionInAreaActivityType",
+      
       "newNasSideBarDesign",
       "hideMapModule",
       "companyProfile",
@@ -127,22 +122,22 @@
       
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "advancedSearchOwners",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
-      "mapMarkers",
+      
       "nasAddVesselsToVoi",
-      "nasTransmissionInAreaActivityType",
+      
       "newNasSideBarDesign",
       "portProfile",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "stsClassification",
-      "weatherLayer",
+      
       "cddScreening",
       "wetCargoData"
     ]
@@ -153,15 +148,15 @@
       "hideRuleEngine",
       "newAdvancedSearch",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
+      
       "hideMapModule",
       "companyProfile",
       "exploreCompanies",
@@ -172,15 +167,15 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -198,19 +193,19 @@
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "visualLinkAnalysis",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
-      "mapMarkers",
+      
       "portProfile",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "uboData",
-      "weatherLayer",
+      
       "cddScreening",
       "wetCargoData"
     ]
@@ -221,16 +216,16 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "hideMapTimelineOnVesselProfile",
       "complianceLabel",
       "nasAddVesselsToVoi",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
+      
       "hideMapModule",
       "companyProfile",
       "exploreCompanies",
@@ -241,16 +236,16 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      "weatherLayer",
+      
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
       "nasAddVesselsToVoi",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -269,19 +264,19 @@
       "nasAddVesselsToVoi",
       "savedQueriesNotifications",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "visualLinkAnalysis",
-      "hideSafetyRisk",
-      "hideBorderSecurityRisk",
+      
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
-      "mapMarkers",
+      
       "portProfile",
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "uboData",
-      "weatherLayer",
+      
       "cddScreening",
       "wetCargoData"
     ]
@@ -295,7 +290,7 @@
       "complianceLabel",
       
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -306,7 +301,7 @@
       "newNasSideBarDesign",
       "nasAddVesselsToVoi",
       
-      "weatherLayer",
+      
       "nasPremiumCsvColumns"
     ]
   },
@@ -316,24 +311,24 @@
       "hideRuleEngine",
       "warRiskArea",
       "complianceMode",
-      "softAoi",
+      
       "liveChat",
       "complianceLabel",
       
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "enableExportCompanyPdfReport",
       "companyProfile",
       "exploreCompanies",
       "portProfile",
       "newAdvancedSearch",  
       "savedQueriesNotifications",
-      "hideSafetyRisk",
+      
       "hideMapTimelineOnVesselProfile",
       "newNasSideBarDesign",
       "nasAccidentsActivity",
-      "uboData",
-      "weatherLayer"
+      "uboData"
+      
     ],
     "Financial Institutions Advanced": [
       "newAdvancedSearch",
@@ -341,13 +336,13 @@
       "warRiskArea",
       "nasAccidentsActivity",
       "complianceMode",
-      "softAoi",
+      
       "liveChat",
       "complianceLabel",
       "enableExportCompanyPdfReport",
       
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "companyProfile",
       "exploreCompanies",
       "portProfile",
@@ -359,8 +354,8 @@
       "maiExpertVesselAdverseMedia",
       
       "nasAddVesselsToVoi",
-      "visualLinkAnalysis",
-      "weatherLayer"
+      "visualLinkAnalysis"
+      
     ],
     "Financial Institutions Premium ": [
       "newAdvancedSearch",
@@ -368,13 +363,11 @@
       "warRiskArea",
       "nasAccidentsActivity",
       "complianceMode",
-      "softAoi",
+      
       "liveChat",
       "complianceLabel",
       "enableExportCompanyPdfReport",
-      
       "portStateControl",
-      "userAlreadyLoggedInWarning",
       "companyProfile",
       "exploreCompanies",
       "portProfile",
@@ -386,7 +379,7 @@
       "maiExpertVesselAdverseMedia",      
       "nasAddVesselsToVoi",
       "visualLinkAnalysis",
-      "weatherLayer",
+      
       "cddScreening",
       "wetCargoData"
     ]
@@ -397,20 +390,20 @@
       "hideRuleEngine",
       "warRiskArea",
       "complianceMode",
-      "softAoi",
+            
       "liveChat",
       "complianceLabel",
       "nasAddVesselsToVoi",
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "portProfile",
       "newAdvancedSearch",
       "savedQueriesNotifications",
-      "hideSafetyRisk",
+      
       "hideMapTimelineOnVesselProfile",
       "newNasSideBarDesign",
       "nasAccidentsActivity",
-      "weatherLayer"
+      
     ],
     "Oil & Energy Advanced": [
       "newAdvancedSearch",
@@ -420,9 +413,8 @@
       "complianceMode",
       "enableExportCompanyPdfReport",
       "nasAddVesselsToVoi",
-      
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "companyProfile",
       "exploreCompanies",
       "portProfile",
@@ -433,8 +425,8 @@
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "nasAddVesselsToVoi",
-      "weatherLayer",
-      "hideBorderSecurityRisk",
+      
+      
       "hideRuleEngine",
       "hideSafetyRisk"
     ],
@@ -448,7 +440,7 @@
       "nasAddVesselsToVoi",
     
       "portStateControl",
-      "userAlreadyLoggedInWarning",
+      
       "companyProfile",
       "exploreCompanies",
       "portProfile",
@@ -459,10 +451,10 @@
       "maiExpertVesselSummary",
       "maiExpertVesselAdverseMedia",
       "nasAddVesselsToVoi",
-      "weatherLayer",
+      
       "uboData",
       "cddScreening",
-      "hideBorderSecurityRisk",
+      
       "hideRuleEngine",
       "hideSafetyRisk"
     ]
@@ -487,6 +479,10 @@
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport"
+    ],
+    "HideSafetyRisk and BorderSecurityRisk": [
+      "hideSafetyRisk",
+      "hideBorderSecurit2yRisk"
     ],
     "MAI Expert": [
       "maiExpertVesselSummary",
