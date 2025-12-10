@@ -252,9 +252,11 @@ class MigrationLogic:
             irr_combined = sorted(list((u["irrelevant"] | p["irrelevant"])) )
 
             # Display/Sync: Merge applied add-on plan names into Add-ons needed
+            # Exclude individual features that are covered by add-on bundles
+            feature_extras_not_in_addons = [f for f in feature_extras if f not in add_on_cover]
             merged_extras: List[str] = []
             seen_me = set()
-            for x in list(feature_extras) + list(applied_add_ons):
+            for x in list(feature_extras_not_in_addons) + list(applied_add_ons):
                 key = str(x).strip().lower()
                 if key and key not in seen_me:
                     seen_me.add(key)

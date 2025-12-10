@@ -14,19 +14,12 @@
       "newAdvancedSearch",
       "savedQueriesNotifications",
       "complianceMode",
-      
       "liveChat",
       "complianceLabel",
-      
       "savedQueriesNotifications",
       "portStateControl",
-      
       "advancedSearchOwners",
-      
-      
-      
       "nasAddVesselsToVoi",
-      
       "newNasSideBarDesign",
       "portProfile",
       "companyProfile",
@@ -42,13 +35,9 @@
       "savedQueriesNotifications",
       "liveChat",
       "complianceLabel",
-      
       "savedQueriesNotifications",
       "portStateControl",
-      
       "advancedSearchOwners",
-      
-      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -70,15 +59,10 @@
     "Bunkering Core": [
       "hideRuleEngine",
       "complianceMode",
-      
       "liveChat",
       "complianceLabel",
-      
       "savedQueriesNotifications",
       "portStateControl",
-      
-      
-      
       "hideMapTimelineOnVesselProfile",
       "hideMapModule",
       "stsClassification",
@@ -88,7 +72,6 @@
       "newAdvancedSearch",
       "hideRuleEngine",
       "complianceMode",
-      
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
@@ -477,9 +460,9 @@
       "exploreCompanies",
       "enableExportCompanyPdfReport"
     ],
-    "HideSafetyRisk and BorderSecurityRisk": [
+    "HIDE SAFETY AND BORDER SECURITY RISK": [
       "hideSafetyRisk",
-      "hideBorderSecurit2yRisk"
+      "hideBorderSecurityRisk"
     ],
     "MAI Expert": [
       "maiExpertVesselSummary",
