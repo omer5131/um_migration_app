@@ -1,16 +1,13 @@
 {
   "Shipowners": {
     "Shipowners Core": [
-      
       "complianceMode",
       "liveChat",
       "complianceLabel",
       "portStateControl",
-      
       "portProfile"
     ],
     "Shipowners Advanced": [
-      
       "newAdvancedSearch",
       "savedQueriesNotifications",
       "complianceMode",
@@ -500,7 +497,16 @@
     ],
     "Hide Map Module": [
       "hideMapModule"
+    ],
+    "BI": [
+      "activitySequences",
+      "stsClassification"
+    ],
+    "Dark Fleet": [
+      "darkFleetVOI"
+    ],
+    "Gray Fleet": [
+      "grayFleetVOI"
     ]
-    
   }
 }

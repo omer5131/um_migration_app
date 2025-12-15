@@ -86,6 +86,16 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
     if segment_col and selected_segments is not None:
         mask &= df[segment_col].isin(selected_segments)
     df_filtered = df[mask].reset_index(drop=True)
+    # Enforce: filter out rows with Status == 'Cancels' or null (mapping: Account<>CSM<>Project)
+    try:
+        status_col = next((c for c in df_filtered.columns if str(c).strip().lower() == 'status' or 'status' in str(c).lower()), None)
+        if status_col:
+            ser = df_filtered[status_col]
+            df_filtered = df_filtered[ser.notna()]
+            df_filtered = df_filtered[ser.astype(str).str.strip().str.lower() != 'cancels'].reset_index(drop=True)
+    except Exception:
+        # If anything goes wrong, keep current filtered set rather than failing
+        pass
     st.caption(f"Filtered to {len(df_filtered)} rows from mapping tab.")
 
     st.info(

@@ -24,6 +24,36 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
         return
 
     res_df = st.session_state['results']
+    # Enforce: filter out rows with Status == 'Cancels' or null from mapping (Account<>CSM<>Project)
+    try:
+        mapping_df = st.session_state.get('df_filtered')
+        if mapping_df is None:
+            mapping_df = st.session_state.get('data', {}).get('mapping')
+        name_col = None
+        if isinstance(mapping_df, pd.DataFrame):
+            if 'name' in mapping_df.columns:
+                name_col = 'name'
+            elif 'SalesForce_Account_NAME' in mapping_df.columns:
+                name_col = 'SalesForce_Account_NAME'
+        status_col = None
+        if isinstance(mapping_df, pd.DataFrame):
+            for c in mapping_df.columns:
+                if str(c).strip().lower() == 'status' or 'status' in str(c).lower():
+                    status_col = c
+                    break
+        if isinstance(mapping_df, pd.DataFrame) and name_col and status_col:
+            tmp = mapping_df[[name_col, status_col]].copy().rename(columns={name_col: 'Account'})
+            # Keep rows where Status is not null and not equal to 'Cancels'
+            tmp['_keep'] = tmp[status_col].notna()
+            try:
+                tmp['_keep'] &= tmp[status_col].astype(str).str.strip().str.lower() != 'cancels'
+            except Exception:
+                pass
+            res_df = res_df.merge(tmp[['Account', '_keep']], on='Account', how='left')
+            res_df = res_df[res_df['_keep'] == True].drop(columns=['_keep'])
+    except Exception:
+        # If merge or columns missing, keep current view
+        pass
     st.subheader("Migration Overview")
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Accounts", len(res_df))
