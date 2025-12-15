@@ -6,7 +6,7 @@
       "liveChat",
       "complianceLabel",
       "portStateControl",
-      "hideMapModule",
+      
       "portProfile"
     ],
     "Shipowners Advanced": [
@@ -64,7 +64,7 @@
       "savedQueriesNotifications",
       "portStateControl",
       "hideMapTimelineOnVesselProfile",
-      "hideMapModule",
+      
       "stsClassification",
       "portProfile"
     ],
@@ -85,7 +85,7 @@
       "nasAddVesselsToVoi",
       
       "newNasSideBarDesign",
-      "hideMapModule",
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -140,7 +140,7 @@
       
       
       
-      "hideMapModule",
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -206,7 +206,7 @@
       "nasAddVesselsToVoi",
       "savedQueriesNotifications",
       "portStateControl",
-      "hideMapModule",
+      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -497,6 +497,10 @@
     ],
       "Hide RULE ENGINE": [
       "hideRuleEngine"
+    ],
+    "Hide Map Module": [
+      "hideMapModule"
     ]
+    
   }
 }
