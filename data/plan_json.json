@@ -1,7 +1,7 @@
 {
   "Shipowners": {
     "Shipowners Core": [
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -10,7 +10,7 @@
       "portProfile"
     ],
     "Shipowners Advanced": [
-      "hideRuleEngine",
+      
       "newAdvancedSearch",
       "savedQueriesNotifications",
       "complianceMode",
@@ -29,7 +29,7 @@
       "maiExpertVesselAdverseMedia"
     ],
     "Shipowners Premium": [
-      "hideRuleEngine",
+      
       "complianceMode",
       "newAdvancedSearch",
       "savedQueriesNotifications",
@@ -57,7 +57,7 @@
 
   "Bunkering": {
     "Bunkering Core": [
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -70,7 +70,7 @@
     ],
     "Bunkering Advanced": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -97,7 +97,7 @@
     ],
     "Bunkering Premium": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -128,7 +128,7 @@
 
   "Insurer": {
     "Insurer Core": [
-      "hideRuleEngine",
+      
       "newAdvancedSearch",
       "complianceMode",
       
@@ -148,7 +148,7 @@
     ],
     "Insurer Advanced": [ 
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       "nasAddVesselsToVoi",
       "liveChat",
@@ -169,7 +169,7 @@
     ],
     "Insurer Premium": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -197,7 +197,7 @@
   "Commodity Trader": {
     "Commodity Trader Core": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       
       "liveChat",
@@ -214,7 +214,7 @@
     ],
     "Commodity Trader Advanced": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       
       "liveChat",
@@ -237,7 +237,7 @@
     ],
     "Commodity Trader Premium": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -264,7 +264,7 @@
 
   "Custom": {
     "Custom": [
-      "hideRuleEngine",
+      
       "complianceMode",
       "liveChat",
       "complianceLabel",
@@ -288,7 +288,7 @@
 
   "Financial Institutions": {
     "Financial Institutions Core": [
-      "hideRuleEngine",
+      
       "warRiskArea",
       "complianceMode",
       
@@ -312,7 +312,7 @@
     ],
     "Financial Institutions Advanced": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "warRiskArea",
       "nasAccidentsActivity",
       "complianceMode",
@@ -339,7 +339,7 @@
     ],
     "Financial Institutions Premium ": [
       "newAdvancedSearch",
-      "hideRuleEngine",
+      
       "warRiskArea",
       "nasAccidentsActivity",
       "complianceMode",
@@ -367,7 +367,7 @@
 
   "Oil & Energy": {
     "Oil & Energy Core": [
-      "hideRuleEngine",
+      
       "warRiskArea",
       "complianceMode",
             
@@ -407,7 +407,7 @@
       "nasAddVesselsToVoi",
       
       
-      "hideRuleEngine",
+      
       "hideSafetyRisk"
     ],
     "Oil & Energy Premium": [
@@ -435,7 +435,7 @@
       "uboData",
       "cddScreening",
       
-      "hideRuleEngine",
+      
       "hideSafetyRisk"
     ]
   },
@@ -494,6 +494,9 @@
     ],
     "NAS Premium CSV Columns": [
       "nasPremiumCsvColumns"
+    ],
+      "Hide RULE ENGINE": [
+      "hideRuleEngine"
     ]
   }
 }

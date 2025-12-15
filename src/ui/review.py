@@ -29,10 +29,25 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
     col2.metric("Zero Add-ons", len(res_df[res_df['Extras Count'] == 0]))
     col3.metric("High Bloat (>5)", len(res_df[res_df['Bloat Score'] > 5]))
 
-    # Post-run filter: Recommended Plan
-    plans = sorted([p for p in res_df['Recommended Plan'].dropna().unique()])
+    # Post-run filters
+    st.markdown("**Filters (post-run):**")
+    # Filter to accounts with no migration issues (zero add-ons required)
+    only_no_issues = st.checkbox(
+        "Only accounts with no migration issues",
+        value=False,
+        help="Filters to accounts that require no add-ons (Extras Count = 0).",
+    )
+    res_filtered = res_df.copy()
+    if only_no_issues:
+        try:
+            res_filtered = res_filtered[res_filtered['Extras Count'] == 0]
+        except Exception:
+            pass
+
+    # Post-run filter: Recommended Plan (applied after no-issues filter)
+    plans = sorted([p for p in res_filtered['Recommended Plan'].dropna().unique()])
     selected_plans = st.multiselect("Filter by Recommended Plan", plans, default=plans)
-    res_filtered = res_df[res_df['Recommended Plan'].isin(selected_plans)] if selected_plans else res_df
+    res_filtered = res_filtered[res_filtered['Recommended Plan'].isin(selected_plans)] if selected_plans else res_filtered
 
     # Merge approvals into overview for on-screen display, including Approval Comment
     try:
