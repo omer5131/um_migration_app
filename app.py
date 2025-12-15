@@ -1,7 +1,28 @@
-import streamlit as st
 import os
+import sys
 import json
+import streamlit as st
 import pandas as pd
+
+# Ensure repository root (with `src/`) is on sys.path when running from subfolders
+def _ensure_src_on_path() -> None:
+    try:
+        here = os.path.abspath(os.path.dirname(__file__))
+        candidates = [
+            here,
+            os.path.abspath(os.path.join(here, "..")),  # app in a subdir
+            os.path.abspath(os.path.join(here, ".")),   # app at repo root
+        ]
+        for base in candidates:
+            src_dir = os.path.join(base, "src")
+            if os.path.isdir(src_dir) and base not in sys.path:
+                sys.path.insert(0, base)
+                break
+    except Exception:
+        # Non-fatal: Streamlit will surface import errors if this fails
+        pass
+
+_ensure_src_on_path()
 from src.data_loader import (
     load_all_data,
     load_from_excel,
