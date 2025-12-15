@@ -214,3 +214,17 @@ def sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extr
             return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
     except Exception as e:
         return True, f"Saved to CSV; deferred sync setup failed: {str(e)}"
+
+def sync_denial_to_airtable(store, account: str, subtype: str, plan: str, extras: list, denied_by: str, details: dict | None = None) -> tuple:
+    """Submit a denial using the same persistence/sync flow as approval.
+
+    Records a 'Decision' field with value 'Denied' in the saved details so downstream
+    systems can distinguish it from approvals. Uses the same CSV/Airtable pathways.
+    """
+    try:
+        details = details or {}
+        d = dict(details)
+        d['Decision'] = 'Denied'
+        return sync_approval_to_airtable(store, account, subtype, plan, extras, denied_by, details=d)
+    except Exception as e:
+        return False, f"Denial save failed: {e}"

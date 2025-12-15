@@ -26,6 +26,7 @@ from src.ui.helpers import (
     autosave_exports as _autosave_exports,
     get_airtable_config as _get_airtable_config,
     sync_approval_to_airtable as _sync_approval_to_airtable,
+    sync_denial_to_airtable as _sync_denial_to_airtable,
 )
 from src.ui.data_sources import render as render_data_sources_tab
 from src.ui.approvals import render as render_approved_tab
@@ -711,7 +712,13 @@ def main():
             for i, row in df_filtered.iterrows():
                 account_name = row.get('name', str(i))
                 approved = store.get(account_name)
-                if approved:
+                # Treat as locked only if not explicitly marked Denied
+                is_denied = False
+                try:
+                    is_denied = str((approved or {}).get('Decision', '')).strip().lower() == 'denied'
+                except Exception:
+                    is_denied = False
+                if approved and not is_denied:
                     # Respect human lock; do not re-run logic
                     # Compute effective bloat using (plan + extras) - user_features
                     plan_name = approved['Final Plan']
@@ -1092,6 +1099,44 @@ def main():
                         # Auto-save updated Excel snapshot and optional Sheets write
                         _autosave_exports(store)
 
+                if st.button("Submit Denied (Manual Override)"):
+                    if not approved_by.strip():
+                        st.error("Please enter your name in the sidebar.")
+                    else:
+                        # Compute analytics for the manual decision and persist denial
+                        try:
+                            plan_feats = set(logic_engine.plan_definitions.get(new_plan, set()))
+                            user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                            extras_set = set(new_extras)
+                            cls = _classify_sets(plan_feats, user_feats, extras_set)
+                        except Exception:
+                            cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
+
+                        try:
+                            user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                            applied_addon_plans = []
+                            for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                                used = {f for f in (addon_feats or set()) if f in user_feats}
+                                if used:
+                                    applied_addon_plans.append(str(addon_name))
+                        except Exception:
+                            applied_addon_plans = []
+                        combined_extras = [x for x in (applied_addon_plans + list(new_extras)) if str(x).strip()]
+
+                        details_payload = _make_details_payload(
+                            new_plan, cls, combined_extras, comment=comment_manual, under_trial=under_trial_manual
+                        )
+                        if applied_addon_plans:
+                            details_payload['Applied Add-on Plans'] = applied_addon_plans
+                        success, msg = _sync_denial_to_airtable(
+                            store, selected_acc, row['Sub Type'], new_plan, combined_extras, approved_by.strip(), details=details_payload
+                        )
+                        if success:
+                            st.success(f"Denial submitted. {msg}")
+                        else:
+                            st.warning(msg)
+                        _autosave_exports(store)
+
                 st.markdown("---")
                 st.markdown("**Choose from Candidates**")
                 # Show all plan applications and their impact, not only filtered finals
@@ -1202,6 +1247,29 @@ def main():
 
                             _autosave_exports(store)
 
+                    if st.button("Submit Denied (Selected Option)", key="btn_deny_candidate"):
+                        if not approved_by.strip():
+                            st.error("Please enter your name in the sidebar.")
+                        else:
+                            cand_extras_all = [str(x).strip() for x in cand.get('extras', []) if str(x).strip()]
+                            _cm = (comment_candidate or "").strip()
+                            if not _cm:
+                                _cm = (st.session_state.get("comment_manual_lock") or "").strip()
+                            _ut = (under_trial_candidate or "").strip()
+                            if not _ut:
+                                _ut = (st.session_state.get("under_trial_manual_lock") or "").strip()
+                            details_payload = _make_details_payload(
+                                cand.get('plan', current_plan), cls, cand_extras_all, comment=_cm, under_trial=_ut
+                            )
+                            success, msg = _sync_denial_to_airtable(
+                                store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras_all, approved_by.strip(), details=details_payload
+                            )
+                            if success:
+                                st.success(f"Denial submitted. {msg}")
+                            else:
+                                st.warning(msg)
+                            _autosave_exports(store)
+
                 st.markdown("---")
                 st.markdown("**Apply AI Decision**")
                 ai_dec = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
@@ -1266,6 +1334,39 @@ def main():
                             else:
                                 st.warning(msg)
 
+                            _autosave_exports(store)
+
+                    if st.button("Deny AI Decision"):
+                        if not approved_by.strip():
+                            st.error("Please enter your name in the sidebar.")
+                        else:
+                            ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                            try:
+                                user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                                applied_addon_plans = []
+                                for addon_name, addon_feats in getattr(logic_engine, 'add_on_plans', {}).items():
+                                    used = {f for f in (addon_feats or set()) if f in user_feats}
+                                    if used:
+                                        applied_addon_plans.append(str(addon_name))
+                            except Exception:
+                                applied_addon_plans = []
+                            ai_extras_all = [x for x in (applied_addon_plans + ai_extras) if str(x).strip()]
+                            _cm_ai = (st.session_state.get("comment_manual_lock") or "").strip()
+                            if not _cm_ai:
+                                _cm_ai = (st.session_state.get("comment_approve_candidate") or "").strip()
+                            _ut_ai = (st.session_state.get("under_trial_manual_lock") or "").strip()
+                            if not _ut_ai:
+                                _ut_ai = (st.session_state.get("under_trial_approve_candidate") or "").strip()
+                            details_payload = _make_details_payload(
+                                parsed.get('plan', current_plan), cls, ai_extras_all, comment=_cm_ai, under_trial=_ut_ai
+                            )
+                            success, msg = _sync_denial_to_airtable(
+                                store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras_all, approved_by.strip(), details=details_payload
+                            )
+                            if success:
+                                st.success(f"Denial submitted. {msg}")
+                            else:
+                                st.warning(msg)
                             _autosave_exports(store)
 
 if __name__ == "__main__":

@@ -100,7 +100,12 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
         for i, row in df_filtered.iterrows():
             account_name = row.get('name', str(i))
             approved = store.get(account_name)
-            if approved:
+            is_denied = False
+            try:
+                is_denied = str((approved or {}).get('Decision', '')).strip().lower() == 'denied'
+            except Exception:
+                is_denied = False
+            if approved and not is_denied:
                 plan_name = approved['Final Plan']
                 plan_features = set(logic_engine.plan_definitions.get(plan_name, set()))
                 user_features = set(parse_feature_list(row.get('featureNames', [])))

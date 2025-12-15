@@ -15,6 +15,7 @@ from src.ui.helpers import (
     make_details_payload as _make_details_payload,
     autosave_exports as _autosave_exports,
     sync_approval_to_airtable as _sync_approval_to_airtable,
+    sync_denial_to_airtable as _sync_denial_to_airtable,
 )
 
 
@@ -31,18 +32,69 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
 
     # Post-run filters
     st.markdown("**Filters (post-run):**")
-    # Filter to accounts with no migration issues (zero add-ons required)
+    # Filter to accounts with no migration issues using Airtable field
     only_no_issues = st.checkbox(
         "Only accounts with no migration issues",
         value=False,
-        help="Filters to accounts that require no add-ons (Extras Count = 0).",
+        help="Uses Airtable field 'Has Issues for migration' (False = no issues).",
     )
     res_filtered = res_df.copy()
     if only_no_issues:
         try:
-            res_filtered = res_filtered[res_filtered['Extras Count'] == 0]
+            # Pull the mapping used to generate results to access the Airtable flag
+            mapping_df = st.session_state.get('df_filtered')
+            if mapping_df is None:
+                mapping_df = st.session_state.get('data', {}).get('mapping')
+            name_col = None
+            if isinstance(mapping_df, pd.DataFrame):
+                if 'name' in mapping_df.columns:
+                    name_col = 'name'
+                elif 'SalesForce_Account_NAME' in mapping_df.columns:
+                    name_col = 'SalesForce_Account_NAME'
+
+            # Locate the issues column (exact match preferred; fallback to case-insensitive)
+            issues_col = None
+            if isinstance(mapping_df, pd.DataFrame):
+                if 'Has Issues for migration' in mapping_df.columns:
+                    issues_col = 'Has Issues for migration'
+                else:
+                    for c in mapping_df.columns:
+                        if str(c).strip().lower() == 'has issues for migration':
+                            issues_col = c
+                            break
+
+            def _to_bool(v):
+                try:
+                    if isinstance(v, bool):
+                        return v
+                    s = str(v).strip().lower()
+                    if s in ("true", "yes", "y", "1"):  # has issues
+                        return True
+                    if s in ("false", "no", "n", "0", "", "nan", "none"):  # no issues
+                        return False
+                except Exception:
+                    pass
+                return False  # default to no issues if unspecified
+
+            if isinstance(mapping_df, pd.DataFrame) and name_col and issues_col:
+                tmp = mapping_df[[name_col, issues_col]].copy()
+                tmp['_has_migration_issues'] = tmp[issues_col].apply(_to_bool)
+                tmp = tmp.rename(columns={name_col: 'Account'})[['Account', '_has_migration_issues']]
+                res_filtered = res_filtered.merge(tmp, on='Account', how='left')
+                # Keep only rows explicitly marked as no issues (False or missing -> False)
+                res_filtered['_has_migration_issues'] = res_filtered['_has_migration_issues'].fillna(False)
+                res_filtered = res_filtered[res_filtered['_has_migration_issues'] == False].copy()
+                # Drop helper column from view
+                res_filtered = res_filtered.drop(columns=['_has_migration_issues'])
+            else:
+                # Fallback to prior heuristic if Airtable field unavailable
+                res_filtered = res_filtered[res_filtered['Extras Count'] == 0]
         except Exception:
-            pass
+            # Last-resort fallback
+            try:
+                res_filtered = res_filtered[res_filtered['Extras Count'] == 0]
+            except Exception:
+                pass
 
     # Post-run filter: Recommended Plan (applied after no-issues filter)
     plans = sorted([p for p in res_filtered['Recommended Plan'].dropna().unique()])
@@ -122,7 +174,12 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
     current_extras = [x.strip() for x in str(row.get('Add-ons needed', '')).split(',') if x.strip()]
 
     approved = store.get(selected_acc)
-    locked = approved is not None
+    is_denied = False
+    try:
+        is_denied = str((approved or {}).get('Decision', '')).strip().lower() == 'denied'
+    except Exception:
+        is_denied = False
+    locked = approved is not None and not is_denied
     lock_status = "Locked (Human Approved)" if locked else "Not Locked"
     st.caption(f"Status: {lock_status}")
     if locked:
@@ -301,6 +358,23 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                         st.warning(msg)
                     _autosave_exports(store)
 
+            if st.button("Submit Denied (Selected Option)"):
+                if not approved_by.strip():
+                    st.error("Please enter your name in the sidebar.")
+                else:
+                    cand_extras = [str(x).strip() for x in cand.get('extras', [])]
+                    details_payload = _make_details_payload(
+                        cand.get('plan', current_plan), cls, cand_extras, comment=comment_candidate, under_trial=under_trial_candidate
+                    )
+                    success, msg = _sync_denial_to_airtable(
+                        store, selected_acc, row['Sub Type'], cand.get('plan', current_plan), cand_extras, approved_by.strip(), details=details_payload
+                    )
+                    if success:
+                        st.success(f"Denial submitted. {msg}")
+                    else:
+                        st.warning(msg)
+                    _autosave_exports(store)
+
         st.markdown("---")
         st.markdown("**Human Override & Approve**")
         candidates_for_dropdown = []
@@ -380,6 +454,29 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
 
                 _autosave_exports(store)
 
+        if st.button("Submit Denied (Manual Override)"):
+            if not approved_by.strip():
+                st.error("Please enter your name in the sidebar.")
+            else:
+                try:
+                    plan_feats = set(logic_engine.plan_definitions.get(new_plan, set()))
+                    user_feats = set(parse_feature_list(raw_data.get('featureNames', [])))
+                    extras_set = set(new_extras)
+                    cls = _classify_sets(plan_feats, user_feats, extras_set)
+                except Exception:
+                    cls = { 'ga': [], 'ga_present': [], 'ga_will_appear': [], 'irrelevant': [], 'bloat_features': [], 'bloat_costly': [] }
+                details_payload = _make_details_payload(
+                    new_plan, cls, new_extras, comment=comment_approval, under_trial=under_trial_approval
+                )
+                success, msg = _sync_denial_to_airtable(
+                    store, selected_acc, row['Sub Type'], new_plan, new_extras, approved_by.strip(), details=details_payload
+                )
+                if success:
+                    st.success(f"Denial submitted. {msg}")
+                else:
+                    st.warning(msg)
+                _autosave_exports(store)
+
         st.markdown("---")
         st.markdown("**Apply AI Decision**")
         ai_dec = (st.session_state.get('ai_decisions', {}) or {}).get(row['Account'])
@@ -426,6 +523,25 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
                     )
                     if success:
                         st.success(f"AI decision approved and locked! {msg}")
+                    else:
+                        st.warning(msg)
+                    _autosave_exports(store)
+
+            if st.button("Deny AI Decision"):
+                if not approved_by.strip():
+                    st.error("Please enter your name in the sidebar.")
+                else:
+                    ai_extras = [str(x).strip() for x in parsed.get('extras', [])]
+                    comment_for_ai = st.session_state.get(f"approval_comment__{row['Account']}", "")
+                    under_trial_for_ai = st.session_state.get(f"under_trial__{row['Account']}", "")
+                    details_payload = _make_details_payload(
+                        parsed.get('plan', current_plan), cls, ai_extras, comment=comment_for_ai, under_trial=under_trial_for_ai
+                    )
+                    success, msg = _sync_denial_to_airtable(
+                        store, selected_acc, row['Sub Type'], parsed.get('plan', current_plan), ai_extras, approved_by.strip(), details=details_payload
+                    )
+                    if success:
+                        st.success(f"Denial submitted. {msg}")
                     else:
                         st.warning(msg)
                     _autosave_exports(store)
