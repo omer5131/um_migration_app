@@ -207,19 +207,20 @@ class MigrationLogic:
         valid_candidates: List[dict] = []  # filtered list used for auto-recommendation
         all_plan_features: Set[str] = set().union(*self.plan_definitions.values()) if self.plan_definitions else set()
         synonym_hits = {f for f in raw_user_features if canonicalize(f, self.synonyms) != clean_feature_name(f)}
-        # Pre-compute add-on coverage: only the subset of add-on features used by the account
-        applied_add_ons: List[str] = []
-        add_on_cover: Set[str] = set()
-        for addon_name, addon_feats in self.add_on_plans.items():
-            used = {f for f in addon_feats if f in user_features}
-            if used:
-                add_on_cover |= used
-                applied_add_ons.append(addon_name)
-
         for plan in candidates:
             # Base plan features
             plan_features_raw = {clean_feature_name(f) for f in self.plan_definitions.get(plan, set())}
-            # Combine with applicable add-on features actually used by the account
+            # Determine add-ons needed ONLY if the base plan lacks used add-on features
+            applied_add_ons: List[str] = []
+            add_on_cover: Set[str] = set()
+            for addon_name, addon_feats in self.add_on_plans.items():
+                used = {f for f in addon_feats if f in user_features}
+                # Only consider the portion not already covered by the base plan
+                missing_in_plan = {f for f in used if f not in plan_features_raw}
+                if missing_in_plan:
+                    add_on_cover |= missing_in_plan
+                    applied_add_ons.append(addon_name)
+            # Combine base plan with only the missing features covered by needed add-ons
             combined_plan_features = plan_features_raw | add_on_cover
             # Classify and sanitize
             u = self._classify(user_features)
@@ -251,8 +252,8 @@ class MigrationLogic:
             ga_combined = sorted(list((u["ga"] | p["ga"])) )
             irr_combined = sorted(list((u["irrelevant"] | p["irrelevant"])) )
 
-            # Display/Sync: Merge applied add-on plan names into Add-ons needed
-            # Exclude individual features that are covered by add-on bundles
+            # Display/Sync: Merge needed add-on plan names into Add-ons needed
+            # Exclude individual features that are covered by the needed add-on bundles
             feature_extras_not_in_addons = [f for f in feature_extras if f not in add_on_cover]
             merged_extras: List[str] = []
             seen_me = set()

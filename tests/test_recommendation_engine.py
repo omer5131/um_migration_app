@@ -83,3 +83,46 @@ def test_compute_bloat_stats_and_override_red_line():
     # Now attempt override that triggers paid bloat due to non-user costly feature in effective bundle
     res = logic.apply_human_override("Bunkering Base", ["uboData"], user)
     assert res["status"] == "REJECTED_RED_LINE"
+
+
+def test_addon_needed_only_if_missing(monkeypatch):
+    # Stub add-on mapping: MI Expert bundle
+    from src import plan_definitions as plan_defs
+
+    monkeypatch.setattr(
+        plan_defs,
+        "get_add_on_plans",
+        lambda path="data/plan_json.json": {
+            "MI Expert": ["maiExpertVesselSummary", "maiExpertVesselAdverseMedia"]
+        },
+    )
+
+    logic = MigrationLogic(
+        plan_json={
+            "Shipowners Core": ["portStateControl"],
+            # Advanced already includes MI Expert features
+            "Shipowners Advanced": [
+                "portStateControl",
+                "maiExpertVesselSummary",
+                "maiExpertVesselAdverseMedia",
+            ],
+        }
+    )
+
+    row = {
+        "Sub Type": "Shipowner",
+        # Account uses an MI Expert feature
+        "featureNames": ["maiExpertVesselSummary"],
+    }
+    rec = logic.recommend(row)
+    assert rec["status"] == "Success"
+
+    # For the Advanced plan (includes MI Expert), extras must NOT list the add-on
+    adv = next((p for p in rec["all_plans"] if p["plan"] == "Shipowners Advanced"), None)
+    assert adv is not None
+    assert "MI Expert" not in adv.get("extras", [])
+
+    # For the Core plan (missing MI Expert), extras SHOULD list the add-on
+    core = next((p for p in rec["all_plans"] if p["plan"] == "Shipowners Core"), None)
+    assert core is not None
+    assert "MI Expert" in core.get("extras", [])
