@@ -54,35 +54,27 @@
 
   "Bunkering": {
     "Bunkering Core": [
-      
       "complianceMode",
       "liveChat",
       "complianceLabel",
       "savedQueriesNotifications",
       "portStateControl",
       "hideMapTimelineOnVesselProfile",
-      
       "stsClassification",
       "portProfile"
     ],
     "Bunkering Advanced": [
       "newAdvancedSearch",
-      
+      "cddScreening",
       "complianceMode",
       "liveChat",
       "complianceLabel",
       "hideMapTimelineOnVesselProfile",
       "savedQueriesNotifications",
-      "portStateControl",
-      
+      "portStateControl",    
       "advancedSearchOwners",
-      
-      
-      
       "nasAddVesselsToVoi",
-      
       "newNasSideBarDesign",
-      
       "companyProfile",
       "exploreCompanies",
       "enableExportCompanyPdfReport",
@@ -94,7 +86,7 @@
     ],
     "Bunkering Premium": [
       "newAdvancedSearch",
-      
+      "cddScreening",
       "complianceMode",
       "liveChat",
       "complianceLabel",
