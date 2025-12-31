@@ -47,6 +47,11 @@ AIRTABLE = {
     "VIEW": _getenv("AIRTABLE_VIEW", "viwnlPWDCWif3ovUJ"),
     "CACHE_PATH": _getenv("AIRTABLE_CACHE_PATH", os.path.join("data", "airtable_mapping.json")),
     "APPROVALS_TABLE": _getenv("AIRTABLE_APPROVALS_TABLE", "tblWWegam2OOTYpv3"),
+    # New: explicit accounts table (Account<>CSM<>Project) for Recommendations tab input
+    # You can set by name or table ID. Defaults to human-readable table name.
+    "ACCOUNTS_TABLE": _getenv("AIRTABLE_ACCOUNTS_TABLE", "Account<>CSM<>Project"),
+    "ACCOUNTS_VIEW": _getenv("AIRTABLE_ACCOUNTS_VIEW", ""),
+    "ACCOUNTS_CACHE_PATH": _getenv("AIRTABLE_ACCOUNTS_CACHE_PATH", os.path.join("data", "airtable_accounts.json")),
 }
 
 # Background sync interval (seconds) for approvals -> Airtable

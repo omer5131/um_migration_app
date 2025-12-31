@@ -138,6 +138,33 @@ def render(store, openai_key: str, approved_by: str, cost_bloat_weight: int = 0)
         approvals_df = pd.DataFrame()
 
     display_df = res_filtered.drop(columns=['Raw Rec']).copy()
+    # Merge 'Project' name from Airtable mapping (Account<>CSM<>Project), if present
+    try:
+        mapping_df = st.session_state.get('df_filtered')
+        if mapping_df is None:
+            mapping_df = st.session_state.get('data', {}).get('mapping')
+        name_col = None
+        if isinstance(mapping_df, pd.DataFrame):
+            if 'name' in mapping_df.columns:
+                name_col = 'name'
+            elif 'SalesForce_Account_NAME' in mapping_df.columns:
+                name_col = 'SalesForce_Account_NAME'
+        project_col = None
+        if isinstance(mapping_df, pd.DataFrame):
+            for c in mapping_df.columns:
+                if str(c).strip().lower() == 'project':
+                    project_col = c
+                    break
+        if (
+            isinstance(mapping_df, pd.DataFrame)
+            and name_col and project_col
+            and 'Account' in display_df.columns
+            and 'Project' not in display_df.columns
+        ):
+            proj_map = mapping_df[[name_col, project_col]].copy().rename(columns={name_col: 'Account', project_col: 'Project'})
+            display_df = display_df.merge(proj_map, on='Account', how='left')
+    except Exception:
+        pass
     if isinstance(approvals_df, pd.DataFrame) and not approvals_df.empty:
         field_name = (
             'Add-ons needed' if 'Add-ons needed' in approvals_df.columns else (

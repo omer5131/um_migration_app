@@ -271,6 +271,37 @@ def load_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
 
 
 @st.cache_data
+def load_accounts_mapping_from_airtable(refresh: bool = False, ttl_seconds: int | None = None):
+    """Load the Accounts mapping directly from the Airtable table 'Account<>CSM<>Project'.
+
+    Uses AIRTABLE.API_KEY/BASE_ID and AIRTABLE.ACCOUNTS_TABLE. Caches to
+    AIRTABLE.ACCOUNTS_CACHE_PATH.
+
+    - refresh=True forces a fetch.
+    - ttl_seconds controls staleness if not forcing refresh.
+    """
+    req_keys = ("API_KEY", "BASE_ID", "ACCOUNTS_TABLE", "ACCOUNTS_CACHE_PATH")
+    if not all(AIRTABLE.get(k) for k in req_keys):
+        # Fall back to generic loader if accounts-specific config is missing
+        return load_from_airtable(refresh=refresh, ttl_seconds=ttl_seconds)
+
+    cfg = AirtableConfig(
+        api_key=AIRTABLE['API_KEY'],
+        base_id=AIRTABLE['BASE_ID'],
+        table_id_or_name=AIRTABLE['ACCOUNTS_TABLE'],
+        view=(AIRTABLE.get('ACCOUNTS_VIEW') or None),
+    )
+    ttl = 0 if refresh else ttl_seconds
+    df = load_cached_or_fetch(cfg, AIRTABLE['ACCOUNTS_CACHE_PATH'], ttl_seconds=ttl)
+    src = "airtable_live(accounts)" if refresh or ttl == 0 else "airtable_cached(accounts)"
+    return {
+        'mapping': df,
+        'plan_json': get_active_plan_json(),
+        '_source': src,
+    }
+
+
+@st.cache_data
 def suggest_excel_sheet_mapping(sheet_names: list[str]):
     """Heuristically suggest the mapping sheet name only."""
     lower = [s.lower() for s in sheet_names]

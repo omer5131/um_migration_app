@@ -6,7 +6,7 @@ import pandas as pd
 from src.logic import MigrationLogic
 from src.utils import parse_feature_list
 from src.plan_definitions import get_flat_plan_json, get_active_plan_json
-from src.data_loader import load_all_data
+from src.data_loader import load_all_data, load_accounts_mapping_from_airtable
 from src.ui.helpers import classify_sets, enrich_bloat_with_ga, preview_with_display_names, make_details_payload, autosave_exports, sync_approval_to_airtable
 
 
@@ -44,7 +44,19 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
                 st.success(f"✅ Synced {len(airtable_approvals)} approvals from Airtable")
             st.session_state['should_sync_airtable_approvals'] = False
 
-    data = st.session_state.get("data") or load_all_data()
+    # Prefer Airtable 'Account<>CSM<>Project' as the input for this tab
+    data = st.session_state.get("data")
+    try:
+        air = load_accounts_mapping_from_airtable(refresh=False, ttl_seconds=None)
+        if isinstance(air, dict) and isinstance(air.get('mapping'), pd.DataFrame) and not air['mapping'].empty:
+            # Keep any existing plan_json; otherwise take from loader
+            if isinstance(data, dict) and isinstance(data.get('plan_json'), dict):
+                air['plan_json'] = data['plan_json']
+            data = air
+            st.session_state['data'] = data
+    except Exception:
+        # Fallback to previous loader chain
+        data = data or load_all_data()
     if not data:
         st.warning("Please load data first in 'Data Sources'.")
         st.stop()
@@ -146,6 +158,53 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
     except Exception:
         # If anything goes wrong, keep current filtered set rather than failing
         pass
+    # New: show only accounts where 'Ready For migration' is empty in Airtable
+    try:
+        rfm_col = None
+        for c in df_filtered.columns:
+            lc = str(c).strip().lower()
+            if lc == 'ready for migration':  # matches 'Ready For migration'
+                rfm_col = c
+                break
+        if rfm_col:
+            ser = df_filtered[rfm_col]
+            def _is_empty(v):
+                try:
+                    import pandas as _pd
+                    if isinstance(v, (list, dict)):
+                        return len(v) == 0
+                    if v is None:
+                        return True
+                    if isinstance(v, float) and _pd.isna(v):
+                        return True
+                except Exception:
+                    pass
+                s = str(v).strip()
+                return s == '' or s.lower() == 'nan'
+            mask_empty = ser.apply(_is_empty)
+            before = len(df_filtered)
+            df_filtered = df_filtered[mask_empty].reset_index(drop=True)
+            st.caption(f"Ready For migration filter: {before} -> {len(df_filtered)} (showing only empty)")
+    except Exception:
+        pass
+    # Deduplicate by Account (name) and Project to avoid duplicate rows from Airtable
+    try:
+        acct_col = 'name' if 'name' in df_filtered.columns else None
+        proj_col = None
+        for c in df_filtered.columns:
+            if str(c).strip().lower() == 'project':
+                proj_col = c
+                break
+        if acct_col:
+            subset = [acct_col]
+            if proj_col:
+                subset.append(proj_col)
+            before_dups = len(df_filtered)
+            df_filtered = df_filtered.drop_duplicates(subset=subset).reset_index(drop=True)
+            if before_dups != len(df_filtered):
+                st.caption(f"Deduped rows by Account/Project: {before_dups} -> {len(df_filtered)}")
+    except Exception:
+        pass
     st.caption(f"Filtered to {len(df_filtered)} rows from mapping tab.")
 
     st.info(
@@ -159,6 +218,18 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
 
         for i, row in df_filtered.iterrows():
             account_name = row.get('name', str(i))
+            # Resolve Project column from Airtable mapping (case-insensitive)
+            project_value = None
+            try:
+                proj_col = None
+                for c in row.index:
+                    if str(c).strip().lower() == 'project':
+                        proj_col = c
+                        break
+                if proj_col:
+                    project_value = row.get(proj_col)
+            except Exception:
+                project_value = None
 
             # Check both local store and Airtable approvals
             approved = store.get(account_name)
@@ -218,6 +289,7 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
 
             res_row = {
                 "Account": account_name,
+                "Project": project_value,
                 "Already Mapped": already_mapped_status,
                 "Sub Type": row.get('Sub Type', row.get('Subtype', 'Unknown')),
                 "Recommended Plan": rec['recommended_plan'],
