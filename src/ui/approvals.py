@@ -56,7 +56,7 @@ def render(store):
     if airtable_config:
         _start_background_airtable_sync(store, airtable_config, AIRTABLE_SYNC_INTERVAL_SECONDS)
     # Default to local view so recent approvals (with merged add-ons) appear immediately
-    show_local = st.checkbox("Show only local approvals (skip Airtable)", value=True)
+    show_local = st.checkbox("Show only local approvals", value=False)
 
     # Manual sync to Airtable to avoid waiting on deferred background sync
     if airtable_config:
