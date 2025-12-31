@@ -10,7 +10,40 @@ from src.data_loader import load_all_data
 from src.ui.helpers import classify_sets, enrich_bloat_with_ga, preview_with_display_names, make_details_payload, autosave_exports, sync_approval_to_airtable
 
 
+def _sync_approvals_from_airtable():
+    """Sync approvals from Airtable to local store before showing recommendations."""
+    from src.ui.helpers import get_airtable_config
+    from src.airtable import AirtableConfig, fetch_records, records_to_dataframe
+
+    airtable_config = get_airtable_config()
+    if not airtable_config:
+        return None
+
+    try:
+        cfg = AirtableConfig(
+            api_key=airtable_config['api_key'],
+            base_id=airtable_config['base_id'],
+            table_id_or_name=airtable_config['approvals_table']
+        )
+        records = fetch_records(cfg)
+        df_approvals = records_to_dataframe(records)
+        return df_approvals
+    except Exception as e:
+        st.warning(f"Could not fetch approvals from Airtable: {e}")
+        return None
+
+
 def render(store, openai_key: str, paid_bloat_penalty: int):
+    # Sync approvals from Airtable when user opens recommendations tab
+    if st.session_state.get('should_sync_airtable_approvals', True):
+        with st.spinner("Syncing approvals from Airtable..."):
+            airtable_approvals = _sync_approvals_from_airtable()
+            if airtable_approvals is not None and not airtable_approvals.empty:
+                st.session_state['airtable_approvals'] = airtable_approvals
+                st.session_state['last_airtable_sync'] = pd.Timestamp.now()
+                st.success(f"✅ Synced {len(airtable_approvals)} approvals from Airtable")
+            st.session_state['should_sync_airtable_approvals'] = False
+
     data = st.session_state.get("data") or load_all_data()
     if not data:
         st.warning("Please load data first in 'Data Sources'.")
@@ -39,7 +72,12 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
     logic_engine = MigrationLogic(None, data.get('plan_json'), cost_bloat_weight=paid_bloat_penalty)
     # AI toggle and bulk decision removed; recommendations run purely by logic_engine
 
-    st.info(f"Data source: {data.get('_source', 'unknown')}")
+    # Show Airtable sync status
+    last_sync = st.session_state.get('last_airtable_sync')
+    if last_sync:
+        st.info(f"Data source: {data.get('_source', 'unknown')} | Last Airtable sync: {last_sync.strftime('%Y-%m-%d %H:%M:%S')}")
+    else:
+        st.info(f"Data source: {data.get('_source', 'unknown')}")
 
     mapping = data['mapping']
     df = mapping.copy()
@@ -55,6 +93,18 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
          next((col for col, lc in cols_norm.items() if ('sub' in lc and 'type' in lc)), None))
     )
     segment_col = next((col for col, lc in cols_norm.items() if 'segment' in lc), None)
+
+    # Add manual sync button
+    sync_col1, sync_col2 = st.columns([1, 3])
+    with sync_col1:
+        if st.button("🔄 Sync from Airtable"):
+            st.session_state['should_sync_airtable_approvals'] = True
+            st.rerun()
+    with sync_col2:
+        airtable_count = 0
+        if 'airtable_approvals' in st.session_state:
+            airtable_count = len(st.session_state['airtable_approvals'])
+        st.caption(f"Airtable has {airtable_count} approved accounts")
 
     st.markdown("**Filters (pre-run):**")
     fcols = st.columns(3)
@@ -109,8 +159,19 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
 
         for i, row in df_filtered.iterrows():
             account_name = row.get('name', str(i))
+
+            # Check both local store and Airtable approvals
             approved = store.get(account_name)
             is_denied = False
+
+            # Also check if account is in Airtable approvals
+            airtable_approvals = st.session_state.get('airtable_approvals')
+            is_in_airtable = False
+            if airtable_approvals is not None and not airtable_approvals.empty:
+                # Check if account exists in Airtable approvals
+                if 'Account' in airtable_approvals.columns:
+                    is_in_airtable = account_name in airtable_approvals['Account'].values
+
             try:
                 is_denied = str((approved or {}).get('Decision', '')).strip().lower() == 'denied'
             except Exception:
@@ -150,8 +211,14 @@ def render(store, openai_key: str, paid_bloat_penalty: int):
                 rec['bloat_costly_count'] = len(bloat_costly)
                 rec['irrelevantFeatures'] = cls['irrelevant']
 
+            # Mark if account is already in Airtable
+            already_mapped_status = ""
+            if is_in_airtable:
+                already_mapped_status = "✅ Already Mapped"
+
             res_row = {
                 "Account": account_name,
+                "Already Mapped": already_mapped_status,
                 "Sub Type": row.get('Sub Type', row.get('Subtype', 'Unknown')),
                 "Recommended Plan": rec['recommended_plan'],
                 "Add-ons needed": ", ".join(rec['extras']),

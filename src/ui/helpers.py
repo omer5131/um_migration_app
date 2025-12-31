@@ -189,10 +189,9 @@ def get_airtable_config():
 
 
 def sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extras: list, approved_by: str, details: dict | None = None) -> tuple:
-    """Persist locally immediately and defer Airtable sync to navigation time.
+    """Persist locally immediately and sync to Airtable immediately.
 
-    This avoids blocking the UI on REST calls. A pending flag is stored in session state
-    and processed when the user navigates between top-level tabs.
+    Also triggers a refresh of approvals from Airtable to keep the recommendation table updated.
     """
     try:
         # Always upsert locally first
@@ -204,16 +203,22 @@ def sync_approval_to_airtable(store, account: str, subtype: str, plan: str, extr
         table_id = (config or {}).get('approvals_table', '').strip() if config else ''
 
         if api_key and base_id and table_id:
-            # Mark sync as pending and stash config for later
-            st.session_state['airtable_sync_pending'] = True
-            st.session_state['airtable_sync_config'] = {'api_key': api_key, 'base_id': base_id, 'table_id': table_id}
-            return True, "Saved to CSV (Airtable sync deferred; will run on next navigation)"
+            # Sync immediately to Airtable
+            success, msg, created, updated = store.sync_to_airtable(api_key, base_id, table_id, backup=True)
+
+            # Trigger a refresh from Airtable to update the recommendations table
+            st.session_state['should_sync_airtable_approvals'] = True
+
+            if success:
+                return True, f"Saved to CSV and Airtable ({created} created, {updated} updated)"
+            else:
+                return True, f"Saved to CSV but Airtable sync failed: {msg}"
         else:
             if not config:
                 return True, "Saved to CSV (Airtable not configured)"
             return True, f"Saved to CSV (Airtable config incomplete: api_key={bool(api_key)}, base_id={bool(base_id)}, table_id={bool(table_id)})"
     except Exception as e:
-        return True, f"Saved to CSV; deferred sync setup failed: {str(e)}"
+        return True, f"Saved to CSV; sync failed: {str(e)}"
 
 def sync_denial_to_airtable(store, account: str, subtype: str, plan: str, extras: list, denied_by: str, details: dict | None = None) -> tuple:
     """Submit a denial using the same persistence/sync flow as approval.

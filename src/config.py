@@ -77,10 +77,9 @@ GA_FEATURES = [
     "warRiskArea",
     "newNasRiskDesign",
     "newNasSideBarDesign",
-    "resourceSharing"
+    "resourceSharing",
     "trafficLanes",
     "uncertaintyArea",
-
     "userAlreadyLoggedInWarning",
     "sendHeartbeat",
     "complianceMode",
